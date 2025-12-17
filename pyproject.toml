@@ -1,0 +1,244 @@
+[project]
+name = "otel-observability"
+version = "0.1.0"
+description = "OpenTelemetry wrapper for FastAPI and AWS Lambda with Datadog"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+    "opentelemetry-instrumentation>=0.41b0",
+]
+
+[project.optional-dependencies]
+fastapi = [
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "fastapi>=0.100.0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+]
+lambda = [
+    "opentelemetry-propagator-aws-xray>=1.0.0",
+    "opentelemetry-instrumentation-boto3sqs>=0.41b0",
+    "opentelemetry-instrumentation-botocore>=0.41b0",
+]
+database = [
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+    "opentelemetry-instrumentation-psycopg2>=0.41b0",
+    "opentelemetry-instrumentation-pymongo>=0.41b0",
+]
+redis = [
+    "opentelemetry-instrumentation-redis>=0.41b0",
+]
+http = [
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+]
+all = [
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "fastapi>=0.100.0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+    "opentelemetry-instrumentation-psycopg2>=0.41b0",
+    "opentelemetry-instrumentation-pymongo>=0.41b0",
+    "opentelemetry-instrumentation-redis>=0.41b0",
+    "opentelemetry-instrumentation-boto3sqs>=0.41b0",
+    "opentelemetry-instrumentation-botocore>=0.41b0",
+    "opentelemetry-propagator-aws-xray>=1.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Configuração Poetry (alternativa)
+[tool.poetry]
+name = "otel-observability"
+version = "0.1.0"
+description = "OpenTelemetry wrapper for FastAPI and AWS Lambda with Datadog"
+authors = ["Your Team <team@company.com>"]
+packages = [{include = "otel_observability", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+opentelemetry-api = "^1.20.0"
+opentelemetry-sdk = "^1.20.0"
+opentelemetry-exporter-otlp-proto-http = "^1.20.0"
+opentelemetry-instrumentation = "^0.41b0"
+
+# Optional dependencies - FastAPI
+opentelemetry-instrumentation-fastapi = {version = "^0.41b0", optional = true}
+fastapi = {version = "^0.100.0", optional = true}
+
+# Optional dependencies - HTTP clients
+opentelemetry-instrumentation-httpx = {version = "^0.41b0", optional = true}
+opentelemetry-instrumentation-requests = {version = "^0.41b0", optional = true}
+
+# Optional dependencies - Databases
+opentelemetry-instrumentation-sqlalchemy = {version = "^0.41b0", optional = true}
+opentelemetry-instrumentation-psycopg2 = {version = "^0.41b0", optional = true}
+opentelemetry-instrumentation-pymongo = {version = "^0.41b0", optional = true}
+
+# Optional dependencies - Cache/Queue
+opentelemetry-instrumentation-redis = {version = "^0.41b0", optional = true}
+
+# Optional dependencies - AWS
+opentelemetry-instrumentation-boto3sqs = {version = "^0.41b0", optional = true}
+opentelemetry-instrumentation-botocore = {version = "^0.41b0", optional = true}
+opentelemetry-propagator-aws-xray = {version = "^1.0.0", optional = true}
+
+[tool.poetry.extras]
+fastapi = [
+    "opentelemetry-instrumentation-fastapi",
+    "fastapi",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-requests",
+]
+lambda = [
+    "opentelemetry-propagator-aws-xray",
+    "opentelemetry-instrumentation-boto3sqs",
+    "opentelemetry-instrumentation-botocore",
+]
+database = [
+    "opentelemetry-instrumentation-sqlalchemy",
+    "opentelemetry-instrumentation-psycopg2",
+    "opentelemetry-instrumentation-pymongo",
+]
+redis = [
+    "opentelemetry-instrumentation-redis",
+]
+http = [
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-requests",
+]
+all = [
+    "opentelemetry-instrumentation-fastapi",
+    "fastapi",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-requests",
+    "opentelemetry-instrumentation-sqlalchemy",
+    "opentelemetry-instrumentation-psycopg2",
+    "opentelemetry-instrumentation-pymongo",
+    "opentelemetry-instrumentation-redis",
+    "opentelemetry-instrumentation-boto3sqs",
+    "opentelemetry-instrumentation-botocore",
+    "opentelemetry-propagator-aws-xray",
+]
+
+[tool.poetry.group.dev]
+optional = false
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+pytest-asyncio = "^0.21.0"
+pytest-cov = "^4.0.0"
+pytest-mock = "^3.10.0"
+ruff = "^0.1.0"
+pre-commit = "^3.0.0"
+
+# Ruff Configuration
+[tool.ruff]
+# Linha de comprimento máxima
+line-length = 100
+# Diretórios a serem ignorados
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".eggs",
+    "*.egg",
+    "dist",
+    "build",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+]
+
+# Selecionar regras de linting
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "PIE", # flake8-pie
+    "PT",  # flake8-pytest-style
+    "RET", # flake8-return
+    "RUF", # Ruff-specific rules
+]
+
+# Ignorar regras específicas
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+    "ARG001", # unused function argument
+    "ARG002", # unused method argument
+]
+
+# Permitir fix automático para todas as regras
+fixable = ["ALL"]
+unfixable = []
+
+# Configuração de formatação
+[tool.ruff.format]
+# Usar aspas duplas
+quote-style = "double"
+# Indentação com espaços
+indent-style = "space"
+# Tamanho da indentação
+skip-magic-trailing-comma = false
+# Linha de comprimento máxima
+line-ending = "auto"
+
+# Configuração de importação (isort)
+[tool.ruff.lint.isort]
+known-first-party = ["otel_observability"]
+force-sort-within-sections = true
+split-on-trailing-comma = true
+
+# Configuração específica para arquivos
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # unused imports em __init__.py são permitidos
+"tests/**/*.py" = ["ARG", "S101"]  # permitir argumentos não usados e assert em testes
+"examples/**/*.py" = ["T201"]  # permitir print em exemplos
+
+# Pytest Configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]
