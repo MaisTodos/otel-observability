@@ -151,6 +151,87 @@ def send_event(source, detail_type, detail):
     )
 ```
 
+## Chalice - HTTP e SQS
+
+### HTTP (Rotas)
+
+O Chalice é instrumentado automaticamente via middleware HTTP. Todas as rotas HTTP são rastreadas automaticamente.
+
+```python
+from chalice import Chalice
+from otel_observability.chalice import instrument_chalice
+from otel_observability import get_logger, trace
+
+app = Chalice(app_name='myapp')
+
+# Instrumentar ANTES de definir rotas
+instrument_chalice(app)
+
+logger = get_logger(__name__)
+
+@app.route('/users/{user_id}')
+def get_user(user_id: int):
+    logger.info("Fetching user", extra={"user_id": user_id})
+    return {"user_id": user_id}
+
+@app.route('/users', methods=['POST'])
+def create_user():
+    logger.info("Creating user")
+    return {"status": "created"}
+
+@trace("process_payment")
+def process_payment(amount: float):
+    logger.info("Processing payment", extra={"amount": amount})
+    return {"status": "success"}
+```
+
+### SQS (Mensagens)
+
+Para eventos SQS, use o decorator `trace_sqs_message()` junto com `@app.on_sqs_message()`:
+
+```python
+from chalice import Chalice
+from otel_observability.chalice import instrument_chalice, trace_sqs_message
+from otel_observability import get_logger
+
+app = Chalice(app_name='myapp')
+instrument_chalice(app)
+
+logger = get_logger(__name__)
+
+@app.on_sqs_message(queue_name='my-queue')
+@trace_sqs_message()
+def process_sqs_message(event):
+    # event contém a mensagem SQS
+    message_id = event.get('messageId')
+    body = event.get('body', '')
+
+    logger.info("Processing SQS message", extra={
+        "message_id": message_id,
+        "body_length": len(body)
+    })
+
+    # Processar mensagem
+    # ...
+
+    return {"status": "processed"}
+```
+
+**Nota importante**: O decorator `trace_sqs_message()` deve ser usado **depois** de `@app.on_sqs_message()` (decorators são aplicados de baixo para cima).
+
+### Comparação: Chalice vs Lambda Pura
+
+| Aspecto | Chalice | Lambda Pura |
+|---------|---------|-------------|
+| **HTTP** | `instrument_chalice(app)` - middleware automático | `@instrument_lambda_handler()` - decorator no handler |
+| **SQS** | `@trace_sqs_message()` junto com `@app.on_sqs_message()` | `@instrument_lambda_handler()` - extração automática |
+| **Ciclo de vida** | Gerenciado pelo Chalice (não faz shutdown) | Shutdown após cada invocação |
+| **Uso recomendado** | Aplicações serverless com Chalice | Handlers Lambda diretos sem frameworks |
+
+**Quando usar cada um:**
+- **Chalice**: Se você está usando o framework Chalice para sua aplicação
+- **Lambda Pura**: Se você tem handlers Lambda diretos sem frameworks
+
 ## Exemplos Completos
 
 Veja exemplos detalhados em:

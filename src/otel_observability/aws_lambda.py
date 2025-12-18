@@ -30,6 +30,10 @@ def instrument_lambda_handler(
     """
     Decorator para instrumentar AWS Lambda handler com tracing distribuído.
 
+    **Nota importante**: Este decorator é destinado a funções Lambda "puras"
+    (sem frameworks como Chalice). Para aplicações Chalice, use
+    `otel_observability.chalice.instrument_chalice()`.
+
     Args:
         config: Configuração customizada. Se None, carrega de variáveis de ambiente.
         configure_logs: Se True, configura logging com correlação de traces.
@@ -45,6 +49,11 @@ def instrument_lambda_handler(
         >>> def lambda_handler(event, context):
         ...     logger.info("Processing request")
         ...     return {"statusCode": 200, "body": "OK"}
+
+    Note:
+        Para aplicações Chalice, use:
+        >>> from otel_observability.chalice import instrument_chalice
+        >>> instrument_chalice(app)
     """
 
     def decorator(handler: Callable) -> Callable:

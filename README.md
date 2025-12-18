@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-1.20+-blueviolet.svg)](https://opentelemetry.io/)
 
-Biblioteca Python simplificada de **OpenTelemetry** para **FastAPI** e **AWS Lambda** com integração nativa ao **Datadog**.
+Biblioteca Python simplificada de **OpenTelemetry** para **FastAPI**, **AWS Lambda** e **Chalice** com integração nativa ao **Datadog**.
 
 ---
 
@@ -75,6 +75,32 @@ def process_event(event):
     return "processed"
 ```
 
+### Chalice
+
+```python
+from chalice import Chalice
+from otel_observability.chalice import instrument_chalice, trace_sqs_message
+from otel_observability import get_logger, trace
+
+app = Chalice(app_name='myapp')
+
+# Instrumentar ANTES de definir rotas
+instrument_chalice(app)
+
+logger = get_logger(__name__)
+
+@app.route('/users/{user_id}')
+def get_user(user_id: int):
+    logger.info("Fetching user", extra={"user_id": user_id})
+    return {"user_id": user_id}
+
+@app.on_sqs_message(queue_name='my-queue')
+@trace_sqs_message()
+def process_message(event):
+    logger.info("Processing SQS message")
+    return {"status": "processed"}
+```
+
 ---
 
 ## 📦 Instalação
@@ -85,6 +111,9 @@ poetry add otel-observability[fastapi]
 
 # Lambda
 poetry add otel-observability[lambda]
+
+# Chalice
+poetry add otel-observability[chalice]
 
 # Tudo
 poetry add otel-observability[all]
