@@ -2,6 +2,7 @@
 
 from contextvars import ContextVar
 import logging
+import os
 import sys
 from typing import Any
 
@@ -89,6 +90,30 @@ class TraceContextFilter(logging.Filter):
 class JSONFormatter(logging.Formatter):
     """JSON formatter for structured logging."""
 
+    def __init__(self, *args, **kwargs):
+        """Initialize JSON formatter with service tags."""
+        super().__init__(*args, **kwargs)
+        self._service_tags = self._get_service_tags()
+
+    def _get_service_tags(self) -> dict[str, str]:
+        """Get service tags from TelemetryConfig."""
+        try:
+            from .config import TelemetryConfig
+
+            config = TelemetryConfig.from_env()
+            return {
+                "env": config.environment,
+                "service": config.service_name,
+                "version": config.service_version,
+            }
+        except Exception:
+            # Fallback se não conseguir obter config
+            return {
+                "env": os.getenv("OTEL_ENVIRONMENT", "unknown"),
+                "service": os.getenv("OTEL_SERVICE_NAME", "unknown-service"),
+                "version": os.getenv("OTEL_SERVICE_VERSION", "0.0.0"),
+            }
+
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         from datetime import datetime
@@ -101,6 +126,10 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage(),
             "trace_id": getattr(record, "trace_id", ""),
             "span_id": getattr(record, "span_id", ""),
+            # Unified Service Tags (explicitamente nos logs)
+            "env": self._service_tags["env"],
+            "service": self._service_tags["service"],
+            "version": self._service_tags["version"],
         }
 
         # Add exception info if present

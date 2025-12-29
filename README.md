@@ -16,6 +16,8 @@ Biblioteca Python simplificada de **OpenTelemetry** para **FastAPI**, **AWS Lamb
 - **[Configuração](docs/CONFIGURATION.md)** - Variáveis de ambiente e cenários de deployment
 - **[Auto-Instrumentação](docs/AUTO_INSTRUMENTATION.md)** - Bibliotecas suportadas e como funciona
 - **[Datadog](docs/DATADOG.md)** - Observabilidade e troubleshooting
+- **[Métricas](docs/METRICS.md)** - Métricas customizadas com DogStatsD e funis de conversão
+- **[App Runner](docs/APP_RUNNER.md)** - Guia de uso com AWS App Runner e padrão Sidecar
 - **[Logging](docs/LOGGING.md)** - Sistema de logging estruturado com contexto customizado
 - **[Testing](docs/TESTING.md)** - Guia de testes
 
@@ -46,6 +48,20 @@ async def get_user(user_id: int):
 async def process_payment(amount: float):
     logger.info("Processing payment", extra={"amount": amount})
     return {"status": "success"}
+```
+
+### Métricas Customizadas
+
+```python
+from otel_observability.metrics import increment_counter, track_funnel_step
+
+# Contar requisições
+increment_counter("app.requests", tags=["endpoint:/api/users"])
+
+# Rastrear funil de conversão
+track_funnel_step("checkout", "start", tags=["region:us-east-1"])
+track_funnel_step("checkout", "payment_success", tags=["region:us-east-1"])
+track_funnel_step("checkout", "completed", tags=["region:us-east-1"])
 ```
 
 ### AWS Lambda
@@ -115,6 +131,9 @@ poetry add otel-observability[lambda]
 # Chalice
 poetry add otel-observability[chalice]
 
+# Métricas customizadas (DogStatsD)
+poetry add otel-observability[metrics]
+
 # Tudo
 poetry add otel-observability[all]
 ```
@@ -145,12 +164,16 @@ Veja exemplos detalhados em:
 - [`examples/fastapi_example.py`](examples/fastapi_example.py) - FastAPI com múltiplos casos de uso
 - [`examples/lambda_example.py`](examples/lambda_example.py) - Lambda com diferentes triggers
 - [`examples/distributed_tracing_example.py`](examples/distributed_tracing_example.py) - Tracing distribuído completo
+- [`examples/metrics_example.py`](examples/metrics_example.py) - Métricas customizadas (COUNT, GAUGE, HISTOGRAM)
+- [`examples/funnel_metrics_example.py`](examples/funnel_metrics_example.py) - Funis de conversão completos
+- [`examples/app_runner_example.py`](examples/app_runner_example.py) - App Runner com padrão Sidecar
 
 ---
 
 ## 🔑 Características Principais
 
 - ✅ **Tracing Distribuído** - Rastreamento end-to-end entre serviços
+- ✅ **Métricas Customizadas** - DogStatsD para métricas de negócio e funis de conversão
 - ✅ **Auto-Instrumentação** - Instrumenta bibliotecas automaticamente (httpx, requests, boto3, etc.)
 - ✅ **Logging Estruturado** - Logs correlacionados com traces via `trace_id` e `span_id`
 - ✅ **Contexto Customizado** - Adicione contexto customizado aos logs automaticamente

@@ -92,6 +92,27 @@ except ImportError:
     instrument_chalice = None
     trace_sqs_message = None
 
+# Metrics integration (optional - requires datadog package)
+try:
+    from .metrics import (
+        flush,
+        increment_counter,
+        record_distribution,
+        record_histogram,
+        set_gauge,
+        track_funnel_step,
+    )
+
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
+    increment_counter = None
+    set_gauge = None
+    record_histogram = None
+    record_distribution = None
+    track_funnel_step = None
+    flush = None
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -119,3 +140,16 @@ __all__ = [
 # Add Chalice exports if available
 if CHALICE_AVAILABLE:
     __all__.extend(["instrument_chalice", "trace_sqs_message"])
+
+# Add Metrics exports if available
+if METRICS_AVAILABLE:
+    __all__.extend(
+        [
+            "increment_counter",
+            "set_gauge",
+            "record_histogram",
+            "record_distribution",
+            "track_funnel_step",
+            "flush",
+        ]
+    )

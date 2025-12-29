@@ -38,6 +38,9 @@ http = [
 chalice = [
     "chalice>=1.0.0",
 ]
+metrics = [
+    "datadog>=0.45.0",
+]
 all = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "fastapi>=0.100.0",
@@ -51,6 +54,7 @@ all = [
     "opentelemetry-instrumentation-botocore>=0.41b0",
     "opentelemetry-propagator-aws-xray>=1.0.0",
     "chalice>=1.0.0",
+    "datadog>=0.45.0",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -104,6 +108,9 @@ opentelemetry-instrumentation-boto3sqs = {version = "^0.41b0", optional = true}
 opentelemetry-instrumentation-botocore = {version = "^0.41b0", optional = true}
 opentelemetry-propagator-aws-xray = {version = "^1.0.0", optional = true}
 
+# Optional dependencies - Metrics
+datadog = {version = "^0.45.0", optional = true}
+
 [tool.poetry.extras]
 fastapi = [
     "opentelemetry-instrumentation-fastapi",
@@ -131,6 +138,9 @@ http = [
 chalice = [
     "chalice",
 ]
+metrics = [
+    "datadog",
+]
 all = [
     "opentelemetry-instrumentation-fastapi",
     "fastapi",
@@ -144,6 +154,7 @@ all = [
     "opentelemetry-instrumentation-botocore",
     "opentelemetry-propagator-aws-xray",
     "chalice",
+    "datadog",
 ]
 
 [tool.poetry.group.dev]

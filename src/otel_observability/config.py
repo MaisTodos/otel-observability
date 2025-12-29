@@ -17,6 +17,9 @@ class TelemetryConfig:
     enable_console_export: bool
     log_level: str
     sample_rate: float
+    dogstatsd_enabled: bool
+    dogstatsd_host: str
+    dogstatsd_port: int
 
     @classmethod
     def from_env(cls) -> "TelemetryConfig":
@@ -34,6 +37,9 @@ class TelemetryConfig:
             OTEL_CONSOLE_EXPORT: Enable console exporter for debugging
             OTEL_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR)
             OTEL_TRACES_SAMPLER_ARG: Sample rate (0.0 to 1.0, default 1.0)
+            DD_DOGSTATSD_ENABLED: Enable DogStatsD metrics (default: true)
+            DD_DOGSTATSD_HOST: DogStatsD host (default: localhost)
+            DD_DOGSTATSD_PORT: DogStatsD port (default: 8125)
         """
         is_lambda = "AWS_LAMBDA_FUNCTION_NAME" in os.environ
 
@@ -45,6 +51,11 @@ class TelemetryConfig:
         # Parse headers
         headers = cls._parse_headers()
 
+        # DogStatsD configuration
+        dogstatsd_enabled = os.getenv("DD_DOGSTATSD_ENABLED", "true").lower() == "true"
+        dogstatsd_host = os.getenv("DD_DOGSTATSD_HOST", "localhost")
+        dogstatsd_port = int(os.getenv("DD_DOGSTATSD_PORT", "8125"))
+
         return cls(
             service_name=os.getenv("OTEL_SERVICE_NAME", "unknown-service"),
             environment=os.getenv("OTEL_ENVIRONMENT", "development"),
@@ -55,6 +66,9 @@ class TelemetryConfig:
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
             log_level=os.getenv("OTEL_LOG_LEVEL", "INFO").upper(),
             sample_rate=float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")),
+            dogstatsd_enabled=dogstatsd_enabled,
+            dogstatsd_host=dogstatsd_host,
+            dogstatsd_port=dogstatsd_port,
         )
 
     @staticmethod
