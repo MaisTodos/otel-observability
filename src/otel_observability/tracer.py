@@ -5,7 +5,7 @@ from functools import wraps
 import logging
 from typing import Any
 
-from opentelemetry import trace
+from opentelemetry import trace as trace_api
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.propagate import set_global_textmap
@@ -72,7 +72,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
         console_exporter = ConsoleSpanExporter()
         _tracer_provider.add_span_processor(BatchSpanProcessor(console_exporter))
 
-    trace.set_tracer_provider(_tracer_provider)
+    trace_api.set_tracer_provider(_tracer_provider)
 
     propagators = [
         TraceContextTextMapPropagator(),
@@ -109,7 +109,7 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         logger.info("Telemetry shutdown complete")
 
 
-def get_tracer(name: str = __name__) -> trace.Tracer:
+def get_tracer(name: str = __name__) -> trace_api.Tracer:
     """
     Get a tracer instance.
 
@@ -124,10 +124,10 @@ def get_tracer(name: str = __name__) -> trace.Tracer:
         >>> with tracer.start_as_current_span("my_operation"):
         ...     pass
     """
-    return trace.get_tracer(name)
+    return trace_api.get_tracer(name)
 
 
-def get_current_span() -> trace.Span:
+def get_current_span() -> trace_api.Span:
     """
     Get the current active span.
 
@@ -138,7 +138,7 @@ def get_current_span() -> trace.Span:
         >>> span = get_current_span()
         >>> span.set_attribute("custom.key", "value")
     """
-    return trace.get_current_span()
+    return trace_api.get_current_span()
 
 
 def get_current_trace_id() -> str:
@@ -152,7 +152,7 @@ def get_current_trace_id() -> str:
         >>> trace_id = get_current_trace_id()
         >>> print(f"Trace ID: {trace_id}")
     """
-    span = trace.get_current_span()
+    span = trace_api.get_current_span()
     ctx = span.get_span_context()
     if ctx.trace_id == 0:
         return ""
@@ -170,7 +170,7 @@ def get_current_span_id() -> str:
         >>> span_id = get_current_span_id()
         >>> print(f"Span ID: {span_id}")
     """
-    span = trace.get_current_span()
+    span = trace_api.get_current_span()
     ctx = span.get_span_context()
     if ctx.span_id == 0:
         return ""
