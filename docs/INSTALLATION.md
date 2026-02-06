@@ -68,6 +68,55 @@ pip install "otel-observability[fastapi,database]"     # FastAPI + Database
 pip install "otel-observability[all]"
 ```
 
+### Instalação via Git (SSH)
+
+Para instalar diretamente do repositório usando Git SSH (útil para desenvolvimento, forks ou versões ainda não publicadas no PyPI):
+
+**Requisito:** chave SSH configurada no GitHub. Teste com: `ssh -T git@github.com`
+
+#### Pip
+
+```bash
+# Instalação básica
+pip install "git+ssh://git@github.com/MaisTodos/otel-observability.git"
+
+# Com extras (ex.: FastAPI + métricas)
+pip install "git+ssh://git@github.com/MaisTodos/otel-observability.git#egg=otel-observability[fastapi,metrics]"
+
+# Lambda
+pip install "git+ssh://git@github.com/MaisTodos/otel-observability.git#egg=otel-observability[lambda]"
+
+# Todas as dependências
+pip install "git+ssh://git@github.com/MaisTodos/otel-observability.git#egg=otel-observability[all]"
+```
+
+#### Poetry
+
+```bash
+# Instalação básica
+poetry add "git+ssh://git@github.com/MaisTodos/otel-observability.git"
+```
+
+Para usar extras com Poetry, edite o `pyproject.toml` e rode `poetry lock && poetry install`:
+
+```toml
+[tool.poetry.dependencies]
+# Exemplo: FastAPI + métricas a partir do repositório
+otel-observability = { git = "ssh://git@github.com/MaisTodos/otel-observability.git", extras = ["fastapi", "metrics"] }
+```
+
+#### UV
+
+```bash
+# Instalação básica
+uv pip install "git+ssh://git@github.com/MaisTodos/otel-observability.git"
+
+# Com extras
+uv pip install "git+ssh://git@github.com/MaisTodos/otel-observability.git#egg=otel-observability[fastapi,metrics]"
+```
+
+**Dica:** Para fixar uma versão ou branch, use `git+ssh://...@github.com/MaisTodos/otel-observability.git@main` (ou `@v1.0.0` para tag).
+
 ## Extras Disponíveis
 
 | Extra | Inclui | Quando Usar |
@@ -118,13 +167,15 @@ pip install "otel-observability[lambda,metrics]"
 
 Após a instalação:
 
-1. [Quick Start](../README.md#-quick-start) - Comece rapidamente
-2. [Configuração](./CONFIGURATION.md) - Configure variáveis de ambiente
-3. [Guia de Uso](./USAGE.md) - Aprenda a usar em detalhes
+1. [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Roteiro de adoção passo a passo
+2. [Quick Start](../README.md#-quick-start) - Comece rapidamente
+3. [Configuração](./CONFIGURATION.md) - Configure variáveis de ambiente
+4. [Guia de Uso](./USAGE.md) - Aprenda a usar em detalhes
 
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Guia orientativo para times e IA
 - [Configuração](./CONFIGURATION.md) - Configuração detalhada
 - [Guia de Uso](./USAGE.md) - Exemplos práticos
 - [Quick Start](../README.md#-quick-start) - Comece rapidamente

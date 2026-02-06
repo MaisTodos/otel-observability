@@ -167,6 +167,7 @@ def process_payment(event, context):
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Aplique estes conceitos em serviços reais
 - [Arquitetura](./ARCHITECTURE.md) - Como funciona o fluxo de dados
 - [Guia de Uso](./USAGE.md) - Exemplos práticos de uso
 - [Auto-Instrumentação](./AUTO_INSTRUMENTATION.md) - Bibliotecas suportadas

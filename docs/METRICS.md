@@ -941,6 +941,7 @@ A: Use fórmulas no Datadog: `(sum:app.funnel.checkout.completed / sum:app.funne
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Onde encaixar métricas na adoção da lib
 - [Configuração](./CONFIGURATION.md) - Configuração detalhada
 - [Datadog](./DATADOG.md) - Observabilidade no Datadog
 - [Guia de Uso](./USAGE.md) - Exemplos práticos

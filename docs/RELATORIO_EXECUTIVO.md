@@ -375,6 +375,7 @@ DD_DOGSTATSD_PORT=8125
 | Documento | Conteúdo | Status |
 |-----------|----------|--------|
 | `README.md` | Visão geral e quick start | ✅ Completo |
+| `docs/IMPLEMENTATION_GUIDE.md` | Guia de implementação e adoção gradual | ✅ Completo |
 | `docs/CONCEPTS.md` | Conceitos de OpenTelemetry | ✅ Completo |
 | `docs/ARCHITECTURE.md` | Arquitetura e fluxo de dados | ✅ Completo |
 | `docs/INSTALLATION.md` | Guia de instalação | ✅ Completo |

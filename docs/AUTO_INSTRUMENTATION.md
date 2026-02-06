@@ -79,6 +79,7 @@ async def get_user(user_id: int):
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Quando e como ativar auto-instrumentação
 - [Guia de Uso](./USAGE.md) - Exemplos práticos
 - [Conceitos](./CONCEPTS.md) - Entenda propagação de contexto
 - [Arquitetura](./ARCHITECTURE.md) - Como funciona o fluxo de dados

@@ -356,6 +356,7 @@ Os logs são automaticamente correlacionados com traces através de `trace_id` e
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Como combinar logs com traces e métricas
 - [Conceitos](./CONCEPTS.md) - Conceitos de OpenTelemetry e propagação de contexto
 - [Guia de Uso](./USAGE.md) - Exemplos práticos de uso
 - [Configuração](./CONFIGURATION.md) - Configuração de variáveis de ambiente

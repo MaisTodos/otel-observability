@@ -2,6 +2,8 @@
 
 Este documento compara as recomendações do material "Arquitetura de Observabilidade Avançada: Estratégias de Instrumentação Profunda para AWS e Datadog" com a implementação atual da biblioteca `otel-observability`.
 
+Para um resumo executivo consolidado, consulte `docs/RELATORIO_EXECUTIVO.md` e `docs/RESUMO_EXECUTIVO.md`. Para orientação prática de adoção e uso em projetos, consulte `docs/IMPLEMENTATION_GUIDE.md`.
+
 ---
 
 ## 1. Unified Service Tagging (Tags Reservadas)

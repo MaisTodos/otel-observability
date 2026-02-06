@@ -584,6 +584,7 @@ functions:
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Passos de adoção recomendados antes dos testes
 - [Conceitos](./CONCEPTS.md) - Conceitos de OpenTelemetry
 - [Guia de Uso](./USAGE.md) - Exemplos práticos
 - [Configuração](./CONFIGURATION.md) - Configuração de variáveis de ambiente

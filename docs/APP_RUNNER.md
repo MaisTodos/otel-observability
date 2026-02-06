@@ -370,6 +370,7 @@ Veja `examples/app_runner_example.py` para um exemplo completo de aplicação Fa
 ## Navegação
 
 - [README](../README.md) - Visão geral
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Passos gerais antes de configurar App Runner
 - [Configuração](./CONFIGURATION.md) - Configuração detalhada
 - [Métricas](./METRICS.md) - Guia de métricas customizadas
 - [Datadog](./DATADOG.md) - Observabilidade no Datadog

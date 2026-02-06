@@ -125,6 +125,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=https://trace-intake.us3.datadoghq.com
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Sequência recomendada de adoção
 - [Arquitetura](./ARCHITECTURE.md) - Entenda o fluxo de dados
 - [Datadog](./DATADOG.md) - Observabilidade e troubleshooting
 - [Instalação](./INSTALLATION.md) - Como instalar a biblioteca

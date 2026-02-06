@@ -138,6 +138,7 @@ Aplicação → OTEL SDK → OTLP Exporter → Datadog Agent → Datadog Cloud
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Como aplicar este fluxo em serviços
 - [Conceitos](./CONCEPTS.md) - Conceitos fundamentais de OpenTelemetry
 - [Configuração](./CONFIGURATION.md) - Como configurar endpoints e variáveis de ambiente
 - [Datadog](./DATADOG.md) - Observabilidade e troubleshooting no Datadog

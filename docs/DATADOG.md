@@ -204,6 +204,7 @@ A biblioteca `otel-observability` já inclui as tags `env`, `service` e `version
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Roteiro de uso da lib em serviços
 - [Arquitetura](./ARCHITECTURE.md) - Entenda o fluxo de dados
 - [Configuração](./CONFIGURATION.md) - Configuração de endpoints
 - [Conceitos](./CONCEPTS.md) - Propagação de contexto

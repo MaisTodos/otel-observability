@@ -242,6 +242,7 @@ Veja exemplos detalhados em:
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
+- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Caminho sugerido para adoção em projetos
 - [Conceitos](./CONCEPTS.md) - Entenda propagação de contexto
 - [Auto-Instrumentação](./AUTO_INSTRUMENTATION.md) - Bibliotecas suportadas
 - [Logging](./LOGGING.md) - Sistema de logging estruturado

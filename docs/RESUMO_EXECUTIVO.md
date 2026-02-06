@@ -62,8 +62,9 @@ A biblioteca `otel-observability` implementa completamente todas as recomendaç�
 
 ## 📚 Documentação
 
-### Documentos (12)
+### Documentos (13)
 - ✅ README.md
+- ✅ IMPLEMENTATION_GUIDE.md
 - ✅ CONCEPTS.md
 - ✅ ARCHITECTURE.md
 - ✅ INSTALLATION.md
@@ -115,5 +116,7 @@ A biblioteca está **pronta para produção** e oferece:
 **Recomendação:** A biblioteca atende completamente aos requisitos de observabilidade avançada e está pronta para uso em produção.
 
 ---
+
+**Para detalhes de execução:** Veja `docs/IMPLEMENTATION_GUIDE.md` (guia de adoção técnica)
 
 **Para mais detalhes:** Veja `docs/RELATORIO_EXECUTIVO.md` (relatório completo)
