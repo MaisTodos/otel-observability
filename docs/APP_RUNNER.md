@@ -1,376 +1,151 @@
-# AWS App Runner com Padrão Sidecar
+# AWS App Runner
 
-Este documento explica como usar a biblioteca `otel-observability` com AWS App Runner usando o padrão Sidecar para telemetria.
-
----
-
-## O que é o Padrão Sidecar?
-
-O **padrão Sidecar** é um padrão arquitetural onde um container auxiliar (sidecar) é executado junto com o container principal da aplicação. No contexto de observabilidade, o Datadog Agent roda como sidecar para coletar métricas, traces e logs.
-
-## Por que usar Sidecar no App Runner?
-
-AWS App Runner abstrai a infraestrutura subjacente, impedindo a instalação de um Agente Datadog a nível de host (como em EC2). Para obter telemetria detalhada, você precisa:
-
-1. **Métricas customizadas (DogStatsD)**: Requer um agente local para receber métricas via `localhost:8125`
-2. **Traces detalhados**: O agente processa e envia traces via OTLP
-3. **Logs estruturados**: O agente coleta logs do stdout/stderr
-
-O padrão Sidecar resolve isso executando o Datadog Agent em um container separado que compartilha o mesmo namespace de rede com a aplicação.
+Este documento explica como usar a biblioteca `otel-observability` com AWS App Runner e o modelo de envio direto ao Datadog.
 
 ---
 
-## Arquitetura
+## Limitação do App Runner
 
-```
-┌─────────────────────────────────────┐
-│     App Runner Service              │
-│                                     │
-│  ┌──────────────┐  ┌─────────────┐ │
-│  │  Aplicação   │  │ Datadog     │ │
-│  │  (Python)    │  │ Agent       │ │
-│  │              │  │ (Sidecar)   │ │
-│  │  localhost:  │  │             │ │
-│  │  8125 (UDP)  │─>│ localhost:  │ │
-│  │  4318 (HTTP) │─>│ 8125, 4318  │ │
-│  └──────────────┘  └─────────────┘ │
-│       │                    │         │
-│       └────────┬───────────┘         │
-│                │                     │
-│                ▼                     │
-│         Datadog Cloud                │
-└─────────────────────────────────────┘
-```
+**App Runner não suporta sidecars.** Cada serviço roda um único container, o que inviabiliza o Datadog Agent no modelo tradicional (sidecar na porta 4318/8125).
 
-A aplicação e o Agent compartilham o mesmo namespace de rede, permitindo comunicação via `localhost`.
+Isso significa que as seguintes abordagens **não funcionam** no App Runner:
+- Datadog Agent como sidecar
+- DogStatsD via `localhost:8125`
+- OTLP para `localhost:4318`
 
 ---
 
-## Configuração
+## Solução: Envio Direto ao Datadog (OTLP Intake)
 
-### Opção 1: App Runner Service (apprunner.yaml)
+O Datadog oferece endpoints OTLP nativos que recebem dados diretamente, sem necessidade de Agent.
 
-Crie um arquivo `apprunner.yaml` na raiz do seu projeto:
-
-```yaml
-version: 1.0
-build:
-  commands:
-    build:
-      - echo "No build commands needed"
-run:
-  runtime: python3
-  command: uvicorn app:app --host 0.0.0.0 --port 8000
-  network:
-    port: 8000
-    env: PORT
-  env:
-    - name: OTEL_SERVICE_NAME
-      value: my-app-runner-service
-    - name: OTEL_ENVIRONMENT
-      value: production
-    - name: OTEL_SERVICE_VERSION
-      value: 1.0.0
-    - name: DD_DOGSTATSD_ENABLED
-      value: "true"
-    - name: DD_DOGSTATSD_HOST
-      value: localhost
-    - name: DD_DOGSTATSD_PORT
-      value: "8125"
-    - name: OTEL_EXPORTER_OTLP_ENDPOINT
-      value: http://localhost:4318
+```
+App Runner A ──┐
+App Runner B ──┼──► Datadog (OTLP direto)
+App Runner C ──┘
 ```
 
-**⚠️ Nota:** App Runner não suporta nativamente múltiplos containers. Para usar o padrão Sidecar, você precisa usar a **Opção 2** (Dockerfile com docker-compose ou ECS).
+### Status por sinal
 
-### Opção 2: Docker Compose (Desenvolvimento Local)
-
-Para desenvolvimento local, use `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  app:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - OTEL_SERVICE_NAME=my-app
-      - OTEL_ENVIRONMENT=development
-      - OTEL_SERVICE_VERSION=1.0.0
-      - DD_DOGSTATSD_ENABLED=true
-      - DD_DOGSTATSD_HOST=localhost
-      - DD_DOGSTATSD_PORT=8125
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-    depends_on:
-      - datadog-agent
-    networks:
-      - app-network
-
-  datadog-agent:
-    image: gcr.io/datadoghq/agent:7
-    environment:
-      - DD_API_KEY=${DD_API_KEY}
-      - DD_SITE=datadoghq.com
-      - DD_APM_ENABLED=true
-      - DD_LOGS_ENABLED=true
-      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=false
-      - DD_APM_NON_LOCAL_TRAFFIC=false
-    ports:
-      - "8125:8125/udp"  # DogStatsD
-      - "4318:4318"      # OTLP
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /proc/:/host/proc/:ro
-      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
-    networks:
-      - app-network
-
-networks:
-  app-network:
-    driver: bridge
-```
-
-**Executar:**
-```bash
-docker-compose up
-```
-
-### Opção 3: ECS Task Definition (Produção)
-
-Para produção no AWS, use ECS com Task Definition:
-
-```json
-{
-  "family": "my-app-with-datadog",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
-  "containerDefinitions": [
-    {
-      "name": "app",
-      "image": "your-ecr-repo/my-app:latest",
-      "essential": true,
-      "portMappings": [
-        {
-          "containerPort": 8000,
-          "protocol": "tcp"
-        }
-      ],
-      "environment": [
-        {
-          "name": "OTEL_SERVICE_NAME",
-          "value": "my-app"
-        },
-        {
-          "name": "OTEL_ENVIRONMENT",
-          "value": "production"
-        },
-        {
-          "name": "OTEL_SERVICE_VERSION",
-          "value": "1.0.0"
-        },
-        {
-          "name": "DD_DOGSTATSD_ENABLED",
-          "value": "true"
-        },
-        {
-          "name": "DD_DOGSTATSD_HOST",
-          "value": "localhost"
-        },
-        {
-          "name": "DD_DOGSTATSD_PORT",
-          "value": "8125"
-        },
-        {
-          "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-          "value": "http://localhost:4318"
-        }
-      ],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/my-app",
-          "awslogs-region": "us-east-1",
-          "awslogs-stream-prefix": "ecs"
-        }
-      }
-    },
-    {
-      "name": "datadog-agent",
-      "image": "public.ecr.aws/datadog/agent:7",
-      "essential": true,
-      "environment": [
-        {
-          "name": "DD_API_KEY",
-          "value": "your-api-key"
-        },
-        {
-          "name": "DD_SITE",
-          "value": "datadoghq.com"
-        },
-        {
-          "name": "DD_APM_ENABLED",
-          "value": "true"
-        },
-        {
-          "name": "DD_LOGS_ENABLED",
-          "value": "true"
-        },
-        {
-          "name": "DD_DOGSTATSD_NON_LOCAL_TRAFFIC",
-          "value": "false"
-        },
-        {
-          "name": "DD_APM_NON_LOCAL_TRAFFIC",
-          "value": "false"
-        }
-      ]
-    }
-  ]
-}
-```
+| Sinal | Endpoint | Status | Ação necessária |
+|---|---|---|---|
+| Logs | `https://otlp.datadoghq.com/v1/logs` | GA | Disponível agora |
+| Métricas | `https://otlp.datadoghq.com/v1/metrics` | GA — Phase 2 da lib | Aguarda implementação |
+| Traces | Endpoint região-específico | Preview — requer CSM | Solicitar acesso ao Datadog |
 
 ---
 
-## Configuração do Datadog Agent
+## Fase 1 — Configuração atual (logs funcionando)
 
-### Variáveis de Ambiente do Agent
+### Variáveis de ambiente no App Runner
 
 ```bash
-DD_API_KEY=your-api-key          # Obrigatório
-DD_SITE=datadoghq.com            # datadoghq.com ou datadoghq.eu
-DD_APM_ENABLED=true              # Habilitar APM (traces)
-DD_LOGS_ENABLED=true             # Habilitar coleta de logs
-DD_DOGSTATSD_NON_LOCAL_TRAFFIC=false  # Aceitar apenas localhost
-DD_APM_NON_LOCAL_TRAFFIC=false        # Aceitar apenas localhost
+OTEL_SERVICE_NAME=banking-back-office
+OTEL_ENVIRONMENT=prod
+OTEL_SERVICE_VERSION=1.0.0
+DD_API_KEY=<sua_api_key>
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https://otlp.datadoghq.com/v1/logs
+
+# Traces: comentado até aprovação do CSM
+# OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=<endpoint-fornecido-pelo-datadog>
 ```
 
-### Portas do Agent
+A lib injeta `DD-API-KEY` automaticamente via `DD_API_KEY` — não é necessário configurar `OTEL_EXPORTER_OTLP_HEADERS` manualmente.
 
-- **8125/udp**: DogStatsD (métricas customizadas)
-- **4318/tcp**: OTLP (traces e métricas OpenTelemetry)
+### O que funciona na Fase 1
+
+- Logs estruturados com `trace_id` e `span_id` correlacionados
+- Auto-instrumentação de FastAPI (request/response)
+- Propagação de contexto W3C (entre serviços)
+- Spans criados em memória (trace context disponível para correlação de logs, mas não exportados)
+
+### O que não funciona ainda
+
+- Traces não são exportados (sem endpoint aprovado)
+- Métricas OTLP não exportadas (Phase 2)
+- DogStatsD não funciona sem Agent
 
 ---
 
-## Envio de Métricas para localhost:8125
+## Fase 2 — Roadmap
 
-A biblioteca `otel-observability` envia métricas automaticamente para `localhost:8125` quando configurada:
+### Traces (bloqueado pelo Datadog)
 
-```python
-from otel_observability.metrics import increment_counter
+O endpoint de traces OTLP direto está em **Preview** e requer aprovação do Customer Success Manager do Datadog.
 
-# Métrica será enviada para localhost:8125
-increment_counter("app.requests", tags=["region:us-east-1"])
-```
+**Ação:** Solicitar acesso ao CSM com a seguinte justificativa:
+- Stack em AWS App Runner (sem suporte a sidecars)
+- Lib compartilhada entre múltiplos serviços
+- 2 dos 3 sinais já funcionando via OTLP direto
 
-**Configuração:**
+Quando aprovado, apenas adicionar a env:
 ```bash
-export DD_DOGSTATSD_ENABLED=true
-export DD_DOGSTATSD_HOST=localhost
-export DD_DOGSTATSD_PORT=8125
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=<endpoint-fornecido-pelo-datadog>
 ```
+Nenhuma mudança de código necessária — a lib já suporta a variável.
 
----
+**Headers adicionais requeridos pelo Datadog (após aprovação):**
+- `dd-api-key`: já injetado automaticamente pela lib
+- `dd-otlp-source`: fornecido pelo Datadog junto com o endpoint
 
-## Envio de Traces para localhost:4318
-
-A biblioteca envia traces via OTLP para `localhost:4318`:
-
-```python
-from otel_observability.fastapi import instrument_fastapi
-from fastapi import FastAPI
-
-app = FastAPI()
-instrument_fastapi(app)  # Traces enviados para localhost:4318
-```
-
-**Configuração:**
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_EXPORTER_OTLP_HEADERS=dd-otlp-source=<source-id-fornecido>
 ```
+
+### Métricas OTLP (bloqueado por implementação)
+
+O endpoint `https://otlp.datadoghq.com/v1/metrics` está GA no Datadog, mas a lib ainda usa DogStatsD para métricas. A implementação do `OTLPMetricExporter` foi adiada para a Fase 2.
+
+**Por que foi adiado:** A API de métricas atual (DogStatsD: `increment_counter`, `gauge`, `histogram`) é incompatível com o modelo OTLP (`MeterProvider`, `Counter`, `Histogram`). A migração exige mudanças na API pública da lib e nos call sites dos serviços.
+
+**Dependências para implementar:**
+- `opentelemetry-sdk>=1.20.0` — já presente como dependência core
+- `OTLPMetricExporter` — já incluído no pacote `opentelemetry-exporter-otlp-proto-http`, sem nova dependência
+
+**O que muda no código (Fase 2):**
+- `config.py`: `otlp_metrics_endpoint` já existe, só precisa ser wired
+- `metrics.py`: adicionar `MeterProvider` + `OTLPMetricExporter` como caminho paralelo ao DogStatsD
+- Env: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://otlp.datadoghq.com/v1/metrics`
 
 ---
 
-## Considerações de Dimensionamento
+## Comparação de Abordagens
 
-### Recursos Compartilhados
-
-⚠️ **Importante:** O Agent sidecar consome recursos da instância App Runner/ECS:
-
-- **Memória:** ~512MB adicionais
-- **CPU:** ~0.1-0.2 vCPU adicionais
-
-**Recomendação:**
-- Aumente a memória total da instância em ~512MB
-- Aumente a CPU se necessário (depende do volume de métricas)
-
-### Exemplo de Dimensionamento
-
-**App Runner:**
-- CPU: 1 vCPU → 1.2 vCPU (recomendado)
-- Memória: 2 GB → 2.5 GB (recomendado)
-
-**ECS Fargate:**
-- CPU: 512 → 1024 (para acomodar Agent)
-- Memória: 1024 → 1536 (para acomodar Agent)
+| | Agent Centralizado (ECS) | Direto ao Datadog |
+|---|---|---|
+| App Runner | Possível (latência de rede) | Nativo |
+| Infra extra | Sim (ECS service) | Não |
+| Ponto de falha | Sim | Não |
+| Traces (agora) | Sim | Preview (aguarda CSM) |
+| Logs (agora) | Sim | Sim |
+| Métricas (agora) | Sim (DogStatsD) | Phase 2 |
 
 ---
 
 ## Troubleshooting
 
-### Métricas não aparecem
+### Logs não aparecem no Datadog
 
-1. **Verificar se Agent está rodando:**
+1. Verificar se `DD_API_KEY` está correto
+2. Verificar se `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` está configurado
+3. Ativar console export para confirmar que logs estão sendo gerados:
    ```bash
-   docker ps | grep datadog
-   # Ou no ECS: verificar logs do container datadog-agent
+   OTEL_CONSOLE_EXPORT=true
    ```
 
-2. **Verificar conectividade:**
-   ```bash
-   # Do container da aplicação
-   nc -u localhost 8125
-   ```
+### Warning "No OTLP traces endpoint configured"
 
-3. **Verificar logs do Agent:**
-   ```bash
-   docker logs <datadog-agent-container-id>
-   ```
+Esperado na Fase 1. A lib emite esse warning quando `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` não está configurado. Traces ficam desabilitados mas a aplicação funciona normalmente — correlação de logs via `trace_id` ainda funciona.
 
-### Traces não aparecem
+### `DD-SITE` header sendo enviado
 
-1. **Verificar endpoint OTLP:**
-   ```bash
-   echo $OTEL_EXPORTER_OTLP_ENDPOINT
-   # Deve ser: http://localhost:4318
-   ```
-
-2. **Verificar se Agent está escutando:**
-   ```bash
-   curl http://localhost:4318/v1/traces
-   ```
-
-### Logs não aparecem
-
-1. **Verificar se DD_LOGS_ENABLED=true no Agent**
-2. **Verificar se logs estão sendo enviados para stdout/stderr**
-3. **Verificar configuração de logs no Agent**
-
----
-
-## Exemplo Completo
-
-Veja `examples/app_runner_example.py` para um exemplo completo de aplicação FastAPI configurada para App Runner com sidecar.
+Versões anteriores da lib injetavam `DD-SITE` como header. Esse header não é usado pelo Datadog no endpoint OTLP. Se aparecer nos logs, atualize para a versão atual da lib e remova `DD_SITE` das suas variáveis de ambiente.
 
 ---
 
 ## Navegação
 
 - [README](../README.md) - Visão geral
-- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Passos gerais antes de configurar App Runner
-- [Configuração](./CONFIGURATION.md) - Configuração detalhada
-- [Métricas](./METRICS.md) - Guia de métricas customizadas
+- [CONFIGURATION.md](./CONFIGURATION.md) - Referência completa de variáveis
+- [CHANGELOG.md](./CHANGELOG.md) - Histórico de mudanças e roadmap
 - [Datadog](./DATADOG.md) - Observabilidade no Datadog

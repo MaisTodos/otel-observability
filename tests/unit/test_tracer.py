@@ -28,7 +28,7 @@ class TestInitTelemetry:
         mock_trace_module = MagicMock()
         with (
             patch("otel_observability.tracer.TracerProvider") as mock_provider,
-            patch("otel_observability.tracer.trace", mock_trace_module),
+            patch("otel_observability.tracer.trace_api", mock_trace_module),
             patch("otel_observability.tracer.set_global_textmap"),
             patch("otel_observability.tracer._tracer_provider", None),
         ):
@@ -42,7 +42,7 @@ class TestInitTelemetry:
         mock_trace_module = MagicMock()
         with (
             patch("otel_observability.tracer.TracerProvider") as mock_provider,
-            patch("otel_observability.tracer.trace", mock_trace_module),
+            patch("otel_observability.tracer.trace_api", mock_trace_module),
             patch("otel_observability.tracer.set_global_textmap"),
             patch("otel_observability.tracer._tracer_provider", None),
         ):
@@ -55,7 +55,7 @@ class TestInitTelemetry:
         mock_trace_module = MagicMock()
         with (
             patch("otel_observability.tracer.TracerProvider") as mock_provider,
-            patch("otel_observability.tracer.trace", mock_trace_module),
+            patch("otel_observability.tracer.trace_api", mock_trace_module),
             patch("otel_observability.tracer.set_global_textmap"),
             patch("otel_observability.tracer._tracer_provider", None),
         ):
@@ -68,6 +68,46 @@ class TestInitTelemetry:
 
             # Deve ter sido chamado apenas uma vez
             assert call_count_1 == call_count_2
+
+    def test_init_telemetry_no_otlp_exporter_when_traces_disabled(
+        self, telemetry_config: TelemetryConfig, reset_telemetry
+    ):
+        """OTLPSpanExporter não é criado quando traces estão desabilitados."""
+        telemetry_config.otlp_traces_endpoint = None
+        telemetry_config.traces_enabled = False
+
+        mock_trace_module = MagicMock()
+        with (
+            patch("otel_observability.tracer.TracerProvider"),
+            patch("otel_observability.tracer.OTLPSpanExporter") as mock_exporter,
+            patch("otel_observability.tracer.trace_api", mock_trace_module),
+            patch("otel_observability.tracer.set_global_textmap"),
+            patch("otel_observability.tracer._tracer_provider", None),
+            patch("otel_observability.logging.init_otlp_log_export", MagicMock()),
+        ):
+            init_telemetry(telemetry_config)
+            mock_exporter.assert_not_called()
+
+    def test_init_telemetry_uses_traces_endpoint(
+        self, telemetry_config: TelemetryConfig, reset_telemetry
+    ):
+        """OTLPSpanExporter usa otlp_traces_endpoint, não otlp_endpoint."""
+        telemetry_config.otlp_traces_endpoint = "http://traces-only:4318"
+        telemetry_config.traces_enabled = True
+
+        mock_trace_module = MagicMock()
+        with (
+            patch("otel_observability.tracer.TracerProvider"),
+            patch("otel_observability.tracer.OTLPSpanExporter") as mock_exporter,
+            patch("otel_observability.tracer.trace_api", mock_trace_module),
+            patch("otel_observability.tracer.set_global_textmap"),
+            patch("otel_observability.tracer._tracer_provider", None),
+            patch("otel_observability.logging.init_otlp_log_export", MagicMock()),
+        ):
+            init_telemetry(telemetry_config)
+            mock_exporter.assert_called_once()
+            call_kwargs = mock_exporter.call_args[1]
+            assert call_kwargs["endpoint"] == "http://traces-only:4318"
 
 
 @pytest.mark.unit
@@ -83,7 +123,7 @@ class TestShutdownTelemetry:
             mock_provider_class.return_value = provider
 
             with (
-                patch("otel_observability.tracer.trace", mock_trace_module),
+                patch("otel_observability.tracer.trace_api", mock_trace_module),
                 patch("otel_observability.tracer.set_global_textmap"),
                 patch("otel_observability.tracer._tracer_provider", None),
             ):
@@ -109,7 +149,7 @@ class TestGetTracer:
         mock_trace_module = MagicMock()
         mock_trace_module.get_tracer.return_value = mock_tracer
 
-        with patch("otel_observability.tracer.trace", mock_trace_module):
+        with patch("otel_observability.tracer.trace_api", mock_trace_module):
             tracer = get_tracer("test.module")
 
             assert tracer == mock_tracer
@@ -126,7 +166,7 @@ class TestGetCurrentSpan:
         mock_trace_module = MagicMock()
         mock_trace_module.get_current_span.return_value = mock_span
 
-        with patch("otel_observability.tracer.trace", mock_trace_module):
+        with patch("otel_observability.tracer.trace_api", mock_trace_module):
             span = get_current_span()
 
             assert span == mock_span
@@ -147,7 +187,7 @@ class TestGetCurrentTraceId:
         mock_trace_module = MagicMock()
         mock_trace_module.get_current_span.return_value = mock_span
 
-        with patch("otel_observability.tracer.trace", mock_trace_module):
+        with patch("otel_observability.tracer.trace_api", mock_trace_module):
             trace_id = get_current_trace_id()
 
             # Trace ID deve ser uma string hex de 32 caracteres
@@ -166,7 +206,7 @@ class TestGetCurrentTraceId:
         mock_trace_module = MagicMock()
         mock_trace_module.get_current_span.return_value = mock_span
 
-        with patch("otel_observability.tracer.trace", mock_trace_module):
+        with patch("otel_observability.tracer.trace_api", mock_trace_module):
             trace_id = get_current_trace_id()
 
             assert trace_id == ""
@@ -187,7 +227,7 @@ class TestGetCurrentSpanId:
         mock_trace_module = MagicMock()
         mock_trace_module.get_current_span.return_value = mock_span
 
-        with patch("otel_observability.tracer.trace", mock_trace_module):
+        with patch("otel_observability.tracer.trace_api", mock_trace_module):
             span_id = get_current_span_id()
 
             # Span ID deve ser uma string hex de 16 caracteres
@@ -206,7 +246,7 @@ class TestGetCurrentSpanId:
         mock_trace_module = MagicMock()
         mock_trace_module.get_current_span.return_value = mock_span
 
-        with patch("otel_observability.tracer.trace", mock_trace_module):
+        with patch("otel_observability.tracer.trace_api", mock_trace_module):
             span_id = get_current_span_id()
 
             assert span_id == ""

@@ -14,6 +14,9 @@ _log_context: ContextVar[dict[str, Any]] = ContextVar(
     default={},
 )
 
+_logger_provider: Any = None
+_module_logger = logging.getLogger(__name__)
+
 
 def set_log_context(**kwargs) -> None:
     """
@@ -216,6 +219,72 @@ def configure_logging(
     # Prevent propagation to avoid duplicate logs
     if logger_name:
         logger.propagate = False
+
+
+def init_otlp_log_export(config: Any, resource: Any) -> None:
+    """
+    Initialize OTLP log exporter if logs endpoint is configured.
+
+    This is an additive path — the existing stdout handler is kept.
+    Called automatically by init_telemetry() when OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is set.
+
+    Args:
+        config: TelemetryConfig instance.
+        resource: OpenTelemetry Resource (shared with TracerProvider).
+    """
+    global _logger_provider
+
+    if not config.otlp_logs_endpoint:
+        return
+
+    try:
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+        _logger_provider = LoggerProvider(resource=resource)
+
+        log_exporter = OTLPLogExporter(
+            endpoint=config.otlp_logs_endpoint,
+            headers=config.otlp_headers or {},
+        )
+        _logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+        set_logger_provider(_logger_provider)
+
+        otel_handler = LoggingHandler(
+            level=logging.NOTSET,
+            logger_provider=_logger_provider,
+        )
+        logging.getLogger().addHandler(otel_handler)
+
+        _module_logger.info(f"OTLP log exporter initialized: endpoint={config.otlp_logs_endpoint}")
+
+    except ImportError:
+        _module_logger.warning(
+            "OTLP log exporter not available. " "Ensure opentelemetry-sdk>=1.20.0 is installed."
+        )
+    except Exception as e:
+        _module_logger.warning(f"Failed to initialize OTLP log exporter: {e}")
+
+
+def shutdown_log_export(timeout: int = 30) -> None:
+    """
+    Flush and shutdown the OTLP log exporter.
+
+    Called automatically by shutdown_telemetry().
+
+    Args:
+        timeout: Maximum time to wait for flush (seconds).
+    """
+    global _logger_provider
+
+    if _logger_provider:
+        try:
+            _logger_provider.force_flush(timeout_millis=timeout * 1000)
+            _logger_provider.shutdown()
+        except Exception as e:
+            _module_logger.warning(f"Error during log export shutdown: {e}")
 
 
 def get_logger(name: str) -> logging.Logger:

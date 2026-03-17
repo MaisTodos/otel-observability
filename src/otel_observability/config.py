@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import os
+import warnings
 
 
 @dataclass
@@ -12,6 +13,10 @@ class TelemetryConfig:
     environment: str
     service_version: str
     otlp_endpoint: str
+    otlp_traces_endpoint: str | None
+    otlp_metrics_endpoint: str | None
+    otlp_logs_endpoint: str | None
+    traces_enabled: bool
     otlp_headers: dict | None
     is_lambda: bool
     enable_console_export: bool
@@ -30,7 +35,11 @@ class TelemetryConfig:
             OTEL_SERVICE_NAME: Service name (required)
             OTEL_ENVIRONMENT: Environment (dev, staging, production)
             OTEL_SERVICE_VERSION: Service version
-            OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint URL
+            OTEL_EXPORTER_OTLP_ENDPOINT: OTLP base endpoint (fallback for all signals)
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: Traces-specific endpoint (overrides base)
+            OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics-specific endpoint (overrides base)
+            OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: Logs-specific endpoint (enables OTLP log export)
+            OTEL_TRACES_ENABLED: Explicitly enable/disable traces exporter (default: true if endpoint available)
             OTEL_EXPORTER_OTLP_HEADERS: OTLP headers (format: key1=value1,key2=value2)
             DD_API_KEY: Datadog API key (if sending directly)
             DD_SITE: Datadog site (datadoghq.com, datadoghq.eu, etc.)
@@ -48,6 +57,31 @@ class TelemetryConfig:
         else:
             endpoint = "http://localhost:4318"
 
+        # Signal-specific endpoint resolution: signal-specific > generic > None
+        generic_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+
+        otlp_traces_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or generic_endpoint or None
+        )
+        otlp_metrics_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or generic_endpoint or None
+        )
+        otlp_logs_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or generic_endpoint or None
+        )
+
+        traces_enabled = (
+            os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true"
+            and otlp_traces_endpoint is not None
+        )
+
+        if not otlp_traces_endpoint:
+            warnings.warn(  # noqa: B028
+                "No OTLP traces endpoint configured. Traces will not be exported. "
+                "Set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT.",
+                UserWarning,
+            )
+
         # Parse headers
         headers = cls._parse_headers()
 
@@ -61,6 +95,10 @@ class TelemetryConfig:
             environment=os.getenv("OTEL_ENVIRONMENT", "development"),
             service_version=os.getenv("OTEL_SERVICE_VERSION", "0.0.0"),
             otlp_endpoint=endpoint,
+            otlp_traces_endpoint=otlp_traces_endpoint,
+            otlp_metrics_endpoint=otlp_metrics_endpoint,
+            otlp_logs_endpoint=otlp_logs_endpoint,
+            traces_enabled=traces_enabled,
             otlp_headers=headers,
             is_lambda=is_lambda,
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
@@ -96,8 +134,6 @@ class TelemetryConfig:
     def __post_init__(self):
         """Validate configuration."""
         if self.service_name == "unknown-service":
-            import warnings
-
             warnings.warn(  # noqa: B028
                 "OTEL_SERVICE_NAME not set. Using 'unknown-service'. "
                 "Set OTEL_SERVICE_NAME environment variable.",

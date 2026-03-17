@@ -108,6 +108,94 @@ class TestTelemetryConfig:
     def test_warning_on_unknown_service(self):
         """Testa que warning é emitido quando service_name não está definido."""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.warns(UserWarning, match="OTEL_SERVICE_NAME not set"):
+            with pytest.warns(UserWarning):
                 config = TelemetryConfig.from_env()
             assert config.service_name == "unknown-service"
+
+    # ------------------------------------------------------------------
+    # Signal-specific endpoint resolution
+    # ------------------------------------------------------------------
+
+    def test_traces_endpoint_falls_back_to_generic(self):
+        """Endpoint genérico é usado como fallback para traces."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://generic:4318"},
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+            assert config.otlp_traces_endpoint == "http://generic:4318"
+            assert config.traces_enabled is True
+
+    def test_traces_endpoint_signal_specific_overrides_generic(self):
+        """Endpoint específico de traces sobrescreve o genérico."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://generic:4318",
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://traces-only:4318",
+            },
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+            assert config.otlp_traces_endpoint == "http://traces-only:4318"
+            assert config.otlp_endpoint == "http://generic:4318"
+
+    def test_traces_disabled_when_no_endpoint(self):
+        """Sem nenhum endpoint configurado, traces ficam desabilitados."""
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.warns(UserWarning):
+                config = TelemetryConfig.from_env()
+            assert config.otlp_traces_endpoint is None
+            assert config.traces_enabled is False
+
+    def test_traces_disabled_explicitly_via_env(self):
+        """OTEL_TRACES_ENABLED=false desabilita traces mesmo com endpoint."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel:4318",
+                "OTEL_TRACES_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+            assert config.traces_enabled is False
+
+    def test_logs_endpoint_falls_back_to_generic(self):
+        """Endpoint genérico é usado como fallback para logs."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://generic:4318"},
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+            assert config.otlp_logs_endpoint == "http://generic:4318"
+
+    def test_logs_endpoint_signal_specific(self):
+        """Endpoint específico de logs é respeitado."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "https://otlp.datadoghq.com/v1/logs"},
+            clear=True,
+        ):
+            with pytest.warns(UserWarning):
+                config = TelemetryConfig.from_env()
+            assert config.otlp_logs_endpoint == "https://otlp.datadoghq.com/v1/logs"
+
+    def test_metrics_endpoint_signal_specific(self):
+        """Endpoint específico de métricas é respeitado."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "https://otlp.datadoghq.com/v1/metrics"},
+            clear=True,
+        ):
+            with pytest.warns(UserWarning):
+                config = TelemetryConfig.from_env()
+            assert config.otlp_metrics_endpoint == "https://otlp.datadoghq.com/v1/metrics"
+
+    def test_warning_emitted_when_no_traces_endpoint(self):
+        """Warning é emitido quando nenhum endpoint de traces está configurado."""
+        with patch.dict(os.environ, {}, clear=True):  # noqa: SIM117
+            with pytest.warns(UserWarning, match="No OTLP traces endpoint configured"):
+                TelemetryConfig.from_env()

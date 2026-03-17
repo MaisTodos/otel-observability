@@ -45,10 +45,12 @@ def _reset_telemetry() -> Generator[None, None, None]:
         shutdown_telemetry(timeout=1)
 
     # Resetar variáveis globais
+    import otel_observability.logging as logging_module
     import otel_observability.tracer as tracer_module
 
     tracer_module._tracer_provider = None
     tracer_module._config = None
+    logging_module._logger_provider = None
 
 
 @pytest.fixture(name="reset_log_context")

@@ -7,129 +7,97 @@ Este documento explica como configurar a biblioteca através de variáveis de am
 ### Obrigatórias
 
 ```bash
-# Identificação do serviço
-export OTEL_SERVICE_NAME=my-service           # Nome do serviço
-export OTEL_ENVIRONMENT=production            # Ambiente (dev, staging, prod)
-export OTEL_SERVICE_VERSION=1.0.0             # Versão
+OTEL_SERVICE_NAME=my-service        # Nome do serviço
+OTEL_ENVIRONMENT=production         # Ambiente (dev, staging, prod)
+DD_API_KEY=your-datadog-api-key     # Autenticação — injetado automaticamente como DD-API-KEY
+```
 
-# OTLP Exporter - IMPORTANTE: Escolha baseado no seu cenário abaixo!
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318  # SEM /v1/traces!
+### Endpoints por sinal (signal-specific)
 
-# Datadog API Key (sempre necessário)
-export DD_API_KEY=your-datadog-api-key
-export DD_SITE=datadoghq.com                  # ou datadoghq.eu, us3, etc.
+A biblioteca usa endpoints separados por sinal de telemetria. A resolução segue a ordem:
+`OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT` → `OTEL_EXPORTER_OTLP_ENDPOINT` → `None` (desabilitado)
+
+```bash
+# Logs — GA, disponível agora
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=<endpoint>
+
+# Traces — Preview no Datadog, requer aprovação do CSM
+# OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=<endpoint-fornecido-pelo-datadog>
+
+# Fallback genérico (opcional) — usado por todos os sinais sem endpoint específico
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
 
 ### Opcionais
 
 ```bash
-export OTEL_TRACES_SAMPLER_ARG=1.0            # Taxa de sampling (0.0 a 1.0)
-export OTEL_LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR
-export OTEL_CONSOLE_EXPORT=false              # Debug: exportar para console
+OTEL_SERVICE_VERSION=1.0.0          # Versão do serviço (default: 0.0.0)
+OTEL_TRACES_SAMPLER_ARG=1.0         # Taxa de sampling, 0.0 a 1.0 (default: 1.0)
+OTEL_TRACES_ENABLED=true            # Forçar desabilitar traces (default: true se endpoint disponível)
+OTEL_LOG_LEVEL=INFO                 # DEBUG, INFO, WARNING, ERROR
+OTEL_CONSOLE_EXPORT=false           # Exportar spans para console (debug local)
 ```
 
-## OTEL_EXPORTER_OTLP_ENDPOINT - Valores por Cenário
+### Desnecessárias
 
-### 1. AWS Lambda com Datadog Extension
+| Variável | Por quê não usar |
+|---|---|
+| `DD_SITE` | Injetada como `DD-SITE` header, mas o Datadog não usa esse header no OTLP. O site é definido pela URL do endpoint |
+| `DD_DOGSTATSD_ENABLED/HOST/PORT` | DogStatsD requer Agent local na porta 8125 — indisponível em App Runner |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Redundante se `DD_API_KEY` já está configurado — a lib injeta `DD-API-KEY` automaticamente |
+
+---
+
+## Cenários de Deployment
+
+### 1. AWS App Runner — Envio Direto ao Datadog (recomendado)
+
+App Runner não suporta sidecars. O envio direto é o único modelo viável sem infraestrutura adicional.
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_SERVICE_NAME=my-app-runner-service
+OTEL_ENVIRONMENT=prod
+OTEL_SERVICE_VERSION=1.0.0
+DD_API_KEY=your-datadog-api-key
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=<endpoint-logs-datadog>
+# OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=<aguarda-csm>
 ```
 
-A Datadog Extension Layer escuta em `localhost:4318` dentro do Lambda e gerencia o envio para o Datadog Cloud.
+> Veja [APP_RUNNER.md](./APP_RUNNER.md) para detalhes e status do endpoint de traces.
 
-**Exemplo serverless.yml:**
+### 2. AWS Lambda com Datadog Extension
 
-```yaml
-# serverless.yml
-functions:
-  my-function:
-    handler: app.handler
-    layers:
-      - arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Extension:XX
-      - arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python:XX
-    environment:
-      OTEL_SERVICE_NAME: my-lambda
-      OTEL_ENVIRONMENT: production
-      DD_API_KEY: ${DD_API_KEY}
-      DD_SITE: datadoghq.com
-      # Extension escuta em localhost:4318
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4318
-```
-
-A Datadog Extension Layer gerencia o envio de traces para o Datadog. Configure o endpoint como `localhost:4318`.
-
-### 2. FastAPI/Container com Datadog Agent
+A Extension escuta em `localhost:4318` dentro do Lambda e repassa os dados ao Datadog.
 
 ```bash
-# Datadog Agent no mesmo container/rede
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-
-# Datadog Agent em container separado (Docker Compose)
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4318
+OTEL_SERVICE_NAME=my-lambda
+OTEL_ENVIRONMENT=production
+DD_API_KEY=your-api-key
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
 
-O Datadog Agent escuta na porta `4318` para receber traces via OTLP e envia para o Datadog Cloud.
+### 3. Container com Datadog Agent (ECS Fargate, Docker Compose)
 
-**Exemplo docker-compose.yml:**
-
-```yaml
-# docker-compose.yml
-services:
-  app:
-    build: .
-    environment:
-      OTEL_SERVICE_NAME: fastapi-api
-      OTEL_ENVIRONMENT: production
-      DD_API_KEY: ${DD_API_KEY}
-      DD_SITE: datadoghq.com
-      # Agent escuta em datadog-agent:4318 (mesma rede Docker)
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4318
-    depends_on:
-      - datadog-agent
-
-  datadog-agent:
-    image: gcr.io/datadoghq/agent:latest
-    environment:
-      DD_API_KEY: ${DD_API_KEY}
-      DD_SITE: datadoghq.com
-      # Habilitar OTLP receiver na porta 4318
-      DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT: 0.0.0.0:4318
-      DD_LOGS_ENABLED: true
-    ports:
-      - "4318:4318"  # Expor porta para acesso externo (opcional)
-```
-
-O Datadog Agent recebe traces via OTLP e envia para o Datadog. Use `datadog-agent:4318` quando em containers separados, ou `localhost:4318` se o Agent estiver no mesmo container.
-
-### 3. Envio Direto para Datadog Intake
+O Agent roda como sidecar e recebe OTLP na porta 4318.
 
 ```bash
-# US1 (datadoghq.com)
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://trace-intake.datadoghq.com
-
-# EU (datadoghq.eu)
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://trace-intake.datadoghq.eu
-
-# US3 (us3.datadoghq.com)
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://trace-intake.us3.datadoghq.com
+OTEL_SERVICE_NAME=my-service
+OTEL_ENVIRONMENT=production
+DD_API_KEY=your-api-key
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # Agent no mesmo namespace de rede
 ```
 
-**Nota:** Envio direto para Datadog sem passar pelo Agent. Não recomendado para produção devido à falta de buffer e retry automático.
-
-**Importante:**
-- Não inclua `/v1/traces` no endpoint - o exporter adiciona automaticamente
-- Use `http://` para localhost e `https://` para Datadog Intake
-- Para produção, prefira Agent/Extension (opções 1 e 2)
+---
 
 ## Navegação
 
 - [README](../README.md) - Visão geral e quick start
-- [Guia de Implementação](./IMPLEMENTATION_GUIDE.md) - Sequência recomendada de adoção
+- [APP_RUNNER.md](./APP_RUNNER.md) - Configuração específica para AWS App Runner
+- [CHANGELOG.md](./CHANGELOG.md) - Histórico de mudanças e roadmap
 - [Arquitetura](./ARCHITECTURE.md) - Entenda o fluxo de dados
 - [Datadog](./DATADOG.md) - Observabilidade e troubleshooting
-- [Instalação](./INSTALLATION.md) - Como instalar a biblioteca
 
 ## Referências Externas
 
-- [Datadog Docs](https://docs.datadoghq.com/tracing/) - Documentação oficial
+- [OpenTelemetry OTLP Exporter Spec](https://opentelemetry.io/docs/specs/otel/protocol/exporter/) - Comportamento de endpoint resolution
+- [Datadog OTLP Ingest](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/) - Documentação oficial

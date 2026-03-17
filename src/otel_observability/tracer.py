@@ -62,11 +62,16 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
     sampler = TraceIdRatioBased(_config.sample_rate)
     _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
 
-    otlp_exporter = OTLPSpanExporter(
-        endpoint=_config.otlp_endpoint,
-        headers=_config.otlp_headers or {},
-    )
-    _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+    if _config.traces_enabled and _config.otlp_traces_endpoint:
+        otlp_exporter = OTLPSpanExporter(
+            endpoint=_config.otlp_traces_endpoint,
+            headers=_config.otlp_headers or {},
+        )
+        _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+    else:
+        logger.info(
+            "Traces OTLP exporter disabled — set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT to enable."
+        )
 
     if _config.enable_console_export:
         console_exporter = ConsoleSpanExporter()
@@ -84,10 +89,16 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
     composite_propagator = CompositeHTTPPropagator(propagators)
     set_global_textmap(composite_propagator)
 
+    from .logging import init_otlp_log_export
+
+    init_otlp_log_export(_config, resource)
+
     logger.info(
         f"Telemetry initialized: service={_config.service_name}, "
         f"env={_config.environment}, version={_config.service_version}, "
-        f"endpoint={_config.otlp_endpoint}, sample_rate={_config.sample_rate}"
+        f"traces_endpoint={_config.otlp_traces_endpoint}, "
+        f"logs_endpoint={_config.otlp_logs_endpoint}, "
+        f"sample_rate={_config.sample_rate}"
     )
 
 
@@ -102,6 +113,10 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         >>> shutdown_telemetry()
     """
     global _tracer_provider
+
+    from .logging import shutdown_log_export
+
+    shutdown_log_export(timeout=timeout)
 
     if _tracer_provider:
         _tracer_provider.force_flush(timeout_millis=timeout * 1000)
