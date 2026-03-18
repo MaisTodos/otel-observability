@@ -246,7 +246,6 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
         _logger_provider = LoggerProvider(resource=resource)
 
         log_exporter = OTLPLogExporter(
-            endpoint=config.otlp_logs_endpoint,
             headers=config.otlp_headers or {},
         )
         _logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
