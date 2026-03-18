@@ -80,10 +80,14 @@ def instrument_fastapi(
 
     cfg = config or TelemetryConfig.from_env()
 
-    init_telemetry(cfg)
-
+    # configure_logging must run BEFORE init_telemetry: init_telemetry calls
+    # init_otlp_log_export which adds the LoggingHandler to the root logger.
+    # If configure_logging runs after, its handlers.clear() removes that handler
+    # and logs never reach Datadog.
     if configure_logs:
         configure_logging(level=cfg.log_level, json_format=json_logs)
+
+    init_telemetry(cfg)
 
     if auto_instrument_libs:
         auto_instrument()
