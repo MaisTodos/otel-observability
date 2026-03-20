@@ -221,6 +221,54 @@ def configure_logging(
         logger.propagate = False
 
 
+def _flatten_value(prefix: str, value: Any, result: dict, depth: int = 0) -> None:
+    """Recursively flatten nested dicts into dot-notation keys."""
+    if depth >= 3:
+        result[prefix] = str(value)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _flatten_value(f"{prefix}.{k}", v, result, depth + 1)
+    elif isinstance(value, str | int | float | bool) or value is None:
+        result[prefix] = value
+    else:
+        result[prefix] = str(value)
+
+
+class FlattenAttributesLogRecordProcessor:
+    """
+    LogRecordProcessor that flattens nested dict attributes into dot-notation keys
+    and serializes non-primitive objects to string before OTLP export.
+
+    This ensures all extra fields passed via logger.info("msg", extra={...}) reach
+    the OTLP exporter, since the OTLP protocol only supports primitive attribute values.
+
+    Examples:
+        {"output": {"count": 42}}       -> {"output.count": 42}
+        {"input": {"account_id": "x"}}  -> {"input.account_id": "x"}
+        {"input": some_dto}             -> {"input": str(some_dto)}
+        {"error": "msg"}                -> {"error": "msg"}  (unchanged)
+    """
+
+    def on_emit(self, log_record: Any, context: Any = None) -> None:
+        if not log_record.attributes:
+            return
+        flattened: dict[str, Any] = {}
+        for key, value in log_record.attributes.items():
+            _flatten_value(key, value, flattened)
+        try:
+            from opentelemetry.attributes import BoundedAttributes
+
+            log_record.attributes = BoundedAttributes(attributes=flattened)
+        except ImportError:
+            log_record.attributes = flattened
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
+
+
 def init_otlp_log_export(config: Any, resource: Any) -> None:
     """
     Initialize OTLP log exporter if logs endpoint is configured.
@@ -250,6 +298,7 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
             endpoint=endpoint,
             headers=config.otlp_headers or {},
         )
+        _logger_provider.add_log_record_processor(FlattenAttributesLogRecordProcessor())
         _logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
         set_logger_provider(_logger_provider)
 
