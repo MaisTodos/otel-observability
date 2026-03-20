@@ -250,17 +250,19 @@ class FlattenAttributesLogRecordProcessor:
     """
 
     def on_emit(self, log_record: Any, context: Any = None) -> None:
-        if not log_record.attributes:
+        # Attributes live on the inner log_record, not on ReadWriteLogRecord directly
+        inner = getattr(log_record, "log_record", log_record)
+        if not inner.attributes:
             return
         flattened: dict[str, Any] = {}
-        for key, value in log_record.attributes.items():
+        for key, value in inner.attributes.items():
             _flatten_value(key, value, flattened)
         try:
             from opentelemetry.attributes import BoundedAttributes
 
-            log_record.attributes = BoundedAttributes(attributes=flattened)
+            inner.attributes = BoundedAttributes(attributes=flattened, immutable=False)
         except ImportError:
-            log_record.attributes = flattened
+            inner.attributes = flattened
 
     def shutdown(self) -> None:
         pass
