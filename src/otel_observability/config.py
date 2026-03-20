@@ -61,14 +61,14 @@ class TelemetryConfig:
         generic_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 
         otlp_traces_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or generic_endpoint or None
-        )
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or generic_endpoint or ""
+        ).strip() or None
         otlp_metrics_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or generic_endpoint or None
-        )
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or generic_endpoint or ""
+        ).strip() or None
         otlp_logs_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or generic_endpoint or None
-        )
+            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or generic_endpoint or ""
+        ).strip() or None
 
         traces_enabled = (
             os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true"
@@ -123,11 +123,11 @@ class TelemetryConfig:
 
         # Datadog API Key
         if dd_api_key := os.getenv("DD_API_KEY"):
-            headers["DD-API-KEY"] = dd_api_key
+            headers["dd-api-key"] = dd_api_key
 
         # Datadog Site
         if dd_site := os.getenv("DD_SITE"):
-            headers["DD-SITE"] = dd_site
+            headers["dd-site"] = dd_site
 
         return headers if headers else None
 

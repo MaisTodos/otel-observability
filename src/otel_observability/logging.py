@@ -245,7 +245,9 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
 
         _logger_provider = LoggerProvider(resource=resource)
 
+        endpoint = config.otlp_logs_endpoint.strip()
         log_exporter = OTLPLogExporter(
+            endpoint=endpoint,
             headers=config.otlp_headers or {},
         )
         _logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
@@ -255,16 +257,17 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
             level=logging.NOTSET,
             logger_provider=_logger_provider,
         )
+        otel_handler.addFilter(TraceContextFilter())
         logging.getLogger().addHandler(otel_handler)
 
-        _module_logger.info(f"OTLP log exporter initialized: endpoint={config.otlp_logs_endpoint}")
+        _module_logger.info(f"OTLP log exporter initialized: endpoint={endpoint}")
 
     except ImportError:
         _module_logger.warning(
-            "OTLP log exporter not available. " "Ensure opentelemetry-sdk>=1.20.0 is installed."
+            "OTLP log exporter not available. Ensure opentelemetry-sdk>=1.20.0 is installed."
         )
     except Exception as e:
-        _module_logger.warning(f"Failed to initialize OTLP log exporter: {e}")
+        _module_logger.warning(f"Failed to initialize OTLP log exporter: {e}", exc_info=True)
 
 
 def shutdown_log_export(timeout: int = 30) -> None:

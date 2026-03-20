@@ -64,7 +64,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     if _config.traces_enabled and _config.otlp_traces_endpoint:
         otlp_exporter = OTLPSpanExporter(
-            endpoint=_config.otlp_traces_endpoint,
+            endpoint=_config.otlp_traces_endpoint.strip(),
             headers=_config.otlp_headers or {},
         )
         _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
