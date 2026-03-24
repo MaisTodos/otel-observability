@@ -2,11 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
+from fastapi import FastAPI
 import pytest
+from starlette.testclient import TestClient
 
 from otel_observability.config import TelemetryConfig
 from otel_observability.fastapi import (
     FASTAPI_AVAILABLE,
+    RequestLoggingMiddleware,
     add_span_attribute,
     add_span_event,
     instrument_fastapi,
@@ -145,3 +148,73 @@ class TestAddSpanEvent:
             add_span_event("payment.processed")
 
             mock_span.add_event.assert_called_once_with("payment.processed", attributes={})
+
+
+def _build_logging_app(logger, skip_log_paths=None) -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/test")
+    async def test_route():
+        return {"ok": True}
+
+    @app.get("/ping")
+    async def ping_route():
+        return {"ok": True}
+
+    kwargs = {"logger": logger}
+    if skip_log_paths is not None:
+        kwargs["skip_log_paths"] = skip_log_paths
+    app.add_middleware(RequestLoggingMiddleware, **kwargs)
+    return app
+
+
+@pytest.mark.unit
+class TestRequestLoggingMiddleware:
+    """Testes para RequestLoggingMiddleware."""
+
+    def test_logs_request_completed_with_correct_fields(self):
+        """Verifica que request.completed é logado com os campos corretos."""
+        mock_logger = MagicMock()
+        client = TestClient(_build_logging_app(mock_logger), raise_server_exceptions=False)
+
+        client.get("/test")
+
+        mock_logger.info.assert_called_once()
+        call_args = mock_logger.info.call_args
+        assert call_args.args[0] == "request.completed"
+        extra = call_args.kwargs["extra"]
+        assert extra["method"] == "GET"
+        assert extra["path"] == "/test"
+        assert extra["status_code"] == 200
+        assert isinstance(extra["duration_ms"], int)
+
+    def test_skip_log_paths_default_suppresses_ping(self):
+        """Verifica que /ping não gera log com o default."""
+        mock_logger = MagicMock()
+        client = TestClient(_build_logging_app(mock_logger), raise_server_exceptions=False)
+
+        client.get("/ping")
+
+        mock_logger.info.assert_not_called()
+
+    def test_custom_skip_log_paths(self):
+        """Verifica que skip_log_paths customizado é respeitado."""
+        mock_logger = MagicMock()
+        client = TestClient(
+            _build_logging_app(mock_logger, skip_log_paths={"/test"}),
+            raise_server_exceptions=False,
+        )
+
+        client.get("/test")
+
+        mock_logger.info.assert_not_called()
+
+    def test_clear_log_context_called_after_request(self):
+        """Verifica que clear_log_context é chamado no finally após cada request."""
+        mock_logger = MagicMock()
+        client = TestClient(_build_logging_app(mock_logger), raise_server_exceptions=False)
+
+        with patch("otel_observability.fastapi.clear_log_context") as mock_clear:
+            client.get("/test")
+
+        mock_clear.assert_called_once()

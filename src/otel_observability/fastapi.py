@@ -1,18 +1,23 @@
 """FastAPI integration with automatic instrumentation and distributed tracing."""
 
 import logging
+import time
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
 
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
     FastAPIInstrumentor = None
+    BaseHTTPMiddleware = object
+    Request = None
 
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
-from .logging import configure_logging
+from .logging import clear_log_context, configure_logging
 from .tracer import init_telemetry
 
 logger = logging.getLogger(__name__)
@@ -176,3 +181,59 @@ def add_span_event(name: str, attributes: dict | None = None):
 
     span = trace.get_current_span()
     span.add_event(name, attributes=attributes or {})
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware genérico de logging de requests para FastAPI/App Runner.
+
+    Responsabilidades:
+    - Medir duração da request
+    - Logar 'request.completed' com method, path, status_code, duration_ms
+    - Garantir clear_log_context() no finally (evita vazamento de contexto OTEL
+      entre requests no mesmo worker)
+
+    Uso típico: subclasse este middleware em cada app para adicionar
+    set_log_context() com os headers de negócio específicos do serviço.
+
+    Args:
+        app: Instância ASGI.
+        logger: Qualquer objeto com método .info(). Tipicamente o ILogger do app.
+        skip_log_paths: Conjunto de paths que não geram log. Default: {"/ping"}.
+
+    Example:
+        >>> from otel_observability.fastapi import RequestLoggingMiddleware
+        >>> from otel_observability import set_log_context
+        >>>
+        >>> class RequestContextMiddleware(RequestLoggingMiddleware):
+        ...     def __init__(self, app):
+        ...         super().__init__(app, logger=my_logger, skip_log_paths={"/ping"})
+        ...
+        ...     async def dispatch(self, request, call_next):
+        ...         set_log_context(user_id=request.headers.get("user_id", ""))
+        ...         return await super().dispatch(request, call_next)
+    """
+
+    def __init__(self, app, logger, skip_log_paths: set[str] | None = None) -> None:
+        super().__init__(app)
+        self._logger = logger
+        self._skip_log_paths = skip_log_paths or {"/ping"}
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.monotonic()
+        try:
+            response = await call_next(request)
+            duration_ms = round((time.monotonic() - start) * 1000)
+            if request.url.path not in self._skip_log_paths:
+                self._logger.info(
+                    "request.completed",
+                    extra={
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status_code": response.status_code,
+                        "duration_ms": duration_ms,
+                    },
+                )
+            return response
+        finally:
+            clear_log_context()

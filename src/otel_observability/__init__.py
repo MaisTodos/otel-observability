@@ -64,7 +64,7 @@ from .aws_lambda import instrument_lambda_handler
 from .config import TelemetryConfig
 
 # FastAPI integration (module always exists, but may raise ImportError if deps missing)
-from .fastapi import instrument_fastapi
+from .fastapi import RequestLoggingMiddleware, instrument_fastapi
 from .logging import (
     clear_log_context,
     configure_logging,
@@ -135,6 +135,7 @@ __all__ = [
     # Framework integrations
     "instrument_fastapi",
     "instrument_lambda_handler",
+    "RequestLoggingMiddleware",
 ]
 
 # Add Chalice exports if available
