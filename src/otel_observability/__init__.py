@@ -92,6 +92,16 @@ except ImportError:
     instrument_chalice = None
     trace_sqs_message = None
 
+# Django integration (optional - module may not be importable)
+try:
+    from .django import DjangoRequestLoggingMiddleware, instrument_django
+
+    DJANGO_AVAILABLE = True
+except ImportError:
+    DJANGO_AVAILABLE = False
+    instrument_django = None
+    DjangoRequestLoggingMiddleware = None
+
 # Metrics integration (optional - requires datadog package)
 try:
     from .metrics import (
@@ -137,6 +147,10 @@ __all__ = [
 # Add Chalice exports if available
 if CHALICE_AVAILABLE:
     __all__.extend(["instrument_chalice", "trace_sqs_message"])
+
+# Add Django exports if available
+if DJANGO_AVAILABLE:
+    __all__.extend(["instrument_django", "DjangoRequestLoggingMiddleware"])
 
 # Add Metrics exports if available
 if METRICS_AVAILABLE:
