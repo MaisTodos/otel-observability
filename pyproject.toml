@@ -38,6 +38,10 @@ http = [
 chalice = [
     "chalice>=1.0.0",
 ]
+django = [
+    "opentelemetry-instrumentation-django>=0.41b0",
+    "django>=4.0",
+]
 metrics = [
     "datadog>=0.45.0",
 ]
@@ -54,6 +58,8 @@ all = [
     "opentelemetry-instrumentation-botocore>=0.41b0",
     "opentelemetry-propagator-aws-xray>=1.0.0",
     "chalice>=1.0.0",
+    "opentelemetry-instrumentation-django>=0.41b0",
+    "django>=4.0",
     "datadog>=0.45.0",
 ]
 
@@ -74,6 +80,8 @@ dev = [
     "pre-commit>=3.0.0",
     "httpx>=0.23,<0.28",
     "fastapi>=0.100.0",
+    "django>=4.0,<7.0",
+    "opentelemetry-instrumentation-django>=0.41b0",
 ]
 
 # Ruff Configuration
