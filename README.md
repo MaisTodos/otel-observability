@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-1.20+-blueviolet.svg)](https://opentelemetry.io/)
 
-Biblioteca Python simplificada de **OpenTelemetry** para **FastAPI**, **AWS Lambda** e **Chalice** com integração nativa ao **Datadog**.
+Biblioteca Python simplificada de **OpenTelemetry** para **FastAPI**, **Django**, **AWS Lambda** e **Chalice** com integração nativa ao **Datadog**.
 
 > **Aviso de Visibilidade**
 >
@@ -99,6 +99,41 @@ def process_event(event):
     return "processed"
 ```
 
+### Django
+
+`instrument_django()` é chamado **uma única vez** por processo — no `wsgi.py`/`asgi.py` ou no `AppConfig.ready()` do app principal do projeto.
+
+```python
+# wsgi.py (recomendado)
+from otel_observability.django import instrument_django
+instrument_django(json_logs=True)  # antes de get_wsgi_application()
+
+from django.core.wsgi import get_wsgi_application
+application = get_wsgi_application()
+```
+
+```python
+# settings.py — middleware registrado uma vez, vale para todo o projeto
+MIDDLEWARE = [
+    "otel_observability.django.DjangoRequestLoggingMiddleware",
+    # ... outros middlewares
+]
+```
+
+```python
+# views.py
+from otel_observability import get_logger, trace
+from otel_observability.django import add_span_attribute
+
+logger = get_logger(__name__)
+
+@trace("get_user")
+def get_user(request, user_id):
+    add_span_attribute("user.id", user_id)
+    logger.info("Fetching user", extra={"user_id": user_id})
+    return JsonResponse({"user_id": user_id})
+```
+
 ### Chalice
 
 ```python
@@ -132,6 +167,9 @@ def process_message(event):
 ```bash
 # FastAPI
 poetry add otel-observability[fastapi]
+
+# Django
+poetry add otel-observability[django]
 
 # Lambda
 poetry add otel-observability[lambda]
@@ -170,6 +208,7 @@ Veja [Configuração](docs/CONFIGURATION.md) para configuração detalhada e dif
 
 Veja exemplos detalhados em:
 - [`examples/fastapi_example.py`](examples/fastapi_example.py) - FastAPI com múltiplos casos de uso
+- [`examples/django_example.py`](examples/django_example.py) - Django com logging, contexto customizado e tracing
 - [`examples/lambda_example.py`](examples/lambda_example.py) - Lambda com diferentes triggers
 - [`examples/distributed_tracing_example.py`](examples/distributed_tracing_example.py) - Tracing distribuído completo
 - [`examples/metrics_example.py`](examples/metrics_example.py) - Métricas customizadas (COUNT, GAUGE, HISTOGRAM)
