@@ -125,9 +125,6 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
-# uv (projeto usa Poetry)
-uv.lock
-
 # IDEs
 .vscode/
 .idea/
