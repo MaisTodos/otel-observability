@@ -13,16 +13,6 @@ from otel_observability import metrics
 
 
 @pytest.fixture
-def _reset_metrics_module():
-    """Reset metrics module state between tests."""
-    metrics._statsd_client = None
-    metrics._config = None
-    yield
-    metrics._statsd_client = None
-    metrics._config = None
-
-
-@pytest.fixture
 def mock_datadog_agent():
     """Mock Datadog Agent UDP server."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -56,7 +46,7 @@ class TestMetricsIntegration:
         os.getenv("SKIP_INTEGRATION_TESTS") == "true",
         reason="Skipping integration tests",
     )
-    @patch("otel_observability.metrics.TelemetryConfig")
+    @patch("otel_observability.config.TelemetryConfig")
     def test_increment_counter_integration(
         self, mock_config_class, mock_datadog_agent, reset_metrics_module
     ):
@@ -87,7 +77,7 @@ class TestMetricsIntegration:
         # It's more of a smoke test to ensure the code path works
         assert True  # If we get here without exception, it's a success
 
-    @patch("otel_observability.metrics.TelemetryConfig")
+    @patch("otel_observability.config.TelemetryConfig")
     def test_funnel_tracking_integration(self, mock_config_class, reset_metrics_module):
         """Test funnel step tracking integration."""
         # Setup mock config
@@ -118,7 +108,7 @@ class TestTagApplication:
     """Test automatic tag application."""
 
     @patch("otel_observability.metrics._get_statsd_client")
-    @patch("otel_observability.metrics.TelemetryConfig")
+    @patch("otel_observability.config.TelemetryConfig")
     def test_unified_tags_applied(self, mock_config_class, mock_get_client, reset_metrics_module):
         """Test that unified tags are automatically applied."""
         # Setup mock config

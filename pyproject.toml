@@ -72,7 +72,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# Configuração Poetry (alternativa)
 [tool.poetry]
 name = "otel-observability"
 version = "0.1.0"
@@ -252,6 +251,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "--cov-fail-under=80",
 ]
 markers = [
     "unit: Unit tests",

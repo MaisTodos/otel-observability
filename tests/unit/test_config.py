@@ -74,8 +74,8 @@ class TestTelemetryConfig:
             },
         ):
             config = TelemetryConfig.from_env()
-            assert config.otlp_headers["DD-API-KEY"] == "test-api-key"
-            assert config.otlp_headers["DD-SITE"] == "datadoghq.com"
+            assert config.otlp_headers["dd-api-key"] == "test-api-key"
+            assert config.otlp_headers["dd-site"] == "datadoghq.com"
 
     def test_console_export_enabled(self):
         """Testa habilitação de console export."""

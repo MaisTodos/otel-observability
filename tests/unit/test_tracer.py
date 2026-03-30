@@ -45,6 +45,7 @@ class TestInitTelemetry:
             patch("otel_observability.tracer.trace_api", mock_trace_module),
             patch("otel_observability.tracer.set_global_textmap"),
             patch("otel_observability.tracer._tracer_provider", None),
+            patch("otel_observability.logging.init_otlp_log_export", MagicMock()),
         ):
             init_telemetry()
 
@@ -58,16 +59,19 @@ class TestInitTelemetry:
             patch("otel_observability.tracer.trace_api", mock_trace_module),
             patch("otel_observability.tracer.set_global_textmap"),
             patch("otel_observability.tracer._tracer_provider", None),
+            patch("otel_observability.logging.init_otlp_log_export", MagicMock()),
+            patch("otel_observability.tracer.logger") as mock_logger,
         ):
             init_telemetry(telemetry_config)
             call_count_1 = mock_provider.call_count
 
-            # Chamar novamente
+            # Chamar novamente — deve logar warning e retornar sem reinicializar
             init_telemetry(telemetry_config)
             call_count_2 = mock_provider.call_count
 
             # Deve ter sido chamado apenas uma vez
             assert call_count_1 == call_count_2
+            mock_logger.warning.assert_called_once_with("Telemetry already initialized. Skipping.")
 
     def test_init_telemetry_no_otlp_exporter_when_traces_disabled(
         self, telemetry_config: TelemetryConfig, reset_telemetry
