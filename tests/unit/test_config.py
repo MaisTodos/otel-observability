@@ -108,7 +108,7 @@ class TestTelemetryConfig:
     def test_warning_on_unknown_service(self):
         """Testa que warning é emitido quando service_name não está definido."""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.warns(UserWarning):
+            with pytest.warns(UserWarning, match="OTEL_SERVICE_NAME not set"):
                 config = TelemetryConfig.from_env()
             assert config.service_name == "unknown-service"
 
@@ -144,7 +144,7 @@ class TestTelemetryConfig:
     def test_traces_disabled_when_no_endpoint(self):
         """Sem nenhum endpoint configurado, traces ficam desabilitados."""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.warns(UserWarning):
+            with pytest.warns(UserWarning, match="No OTLP traces endpoint"):
                 config = TelemetryConfig.from_env()
             assert config.otlp_traces_endpoint is None
             assert config.traces_enabled is False
@@ -179,7 +179,7 @@ class TestTelemetryConfig:
             {"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "https://otlp.datadoghq.com/v1/logs"},
             clear=True,
         ):
-            with pytest.warns(UserWarning):
+            with pytest.warns(UserWarning, match="No OTLP traces endpoint"):
                 config = TelemetryConfig.from_env()
             assert config.otlp_logs_endpoint == "https://otlp.datadoghq.com/v1/logs"
 
@@ -190,7 +190,7 @@ class TestTelemetryConfig:
             {"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "https://otlp.datadoghq.com/v1/metrics"},
             clear=True,
         ):
-            with pytest.warns(UserWarning):
+            with pytest.warns(UserWarning, match="No OTLP traces endpoint"):
                 config = TelemetryConfig.from_env()
             assert config.otlp_metrics_endpoint == "https://otlp.datadoghq.com/v1/metrics"
 

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from otel_observability import chalice as chalice_module
 from otel_observability.chalice import (
     CHALICE_AVAILABLE,
     _extract_sqs_carrier,
@@ -11,6 +12,14 @@ from otel_observability.chalice import (
     trace_sqs_message,
 )
 from otel_observability.config import TelemetryConfig
+
+
+@pytest.fixture(autouse=True)
+def _reset_chalice_instrumented():
+    """Reseta flag global _instrumented entre testes."""
+    chalice_module._instrumented = False
+    yield
+    chalice_module._instrumented = False
 
 
 @pytest.mark.unit
@@ -106,7 +115,16 @@ class TestInstrumentChalice:
         """Testa que o middleware HTTP cria spans corretamente."""
         mock_app = MagicMock()
         mock_app.app_name = "test-app"
-        mock_app.middleware = MagicMock()
+        captured_middleware = []
+
+        def fake_middleware_decorator(event_type):
+            def decorator(func):
+                captured_middleware.append(func)
+                return func
+
+            return decorator
+
+        mock_app.middleware = MagicMock(side_effect=fake_middleware_decorator)
 
         mock_event = MagicMock()
         mock_event.method = "GET"
@@ -141,7 +159,7 @@ class TestInstrumentChalice:
             instrument_chalice(mock_app)
 
             # Obter o middleware registrado
-            middleware_func = mock_app.middleware.call_args[0][1]
+            middleware_func = captured_middleware[0]
 
             # Chamar o middleware
             result = middleware_func(mock_event, mock_get_response)
@@ -162,7 +180,16 @@ class TestInstrumentChalice:
         """Testa que o middleware trata exceções corretamente."""
         mock_app = MagicMock()
         mock_app.app_name = "test-app"
-        mock_app.middleware = MagicMock()
+        captured_middleware = []
+
+        def fake_middleware_decorator(event_type):
+            def decorator(func):
+                captured_middleware.append(func)
+                return func
+
+            return decorator
+
+        mock_app.middleware = MagicMock(side_effect=fake_middleware_decorator)
 
         mock_event = MagicMock()
         mock_event.method = "POST"
@@ -194,7 +221,7 @@ class TestInstrumentChalice:
             mock_extract.return_value = MagicMock()
 
             instrument_chalice(mock_app)
-            middleware_func = mock_app.middleware.call_args[0][1]
+            middleware_func = captured_middleware[0]
 
             with pytest.raises(ValueError, match="Test error"):
                 middleware_func(mock_event, mock_get_response)
@@ -208,7 +235,16 @@ class TestInstrumentChalice:
         """Testa que health checks são identificados corretamente."""
         mock_app = MagicMock()
         mock_app.app_name = "test-app"
-        mock_app.middleware = MagicMock()
+        captured_middleware = []
+
+        def fake_middleware_decorator(event_type):
+            def decorator(func):
+                captured_middleware.append(func)
+                return func
+
+            return decorator
+
+        mock_app.middleware = MagicMock(side_effect=fake_middleware_decorator)
 
         mock_event = MagicMock()
         mock_event.method = "GET"
@@ -236,7 +272,7 @@ class TestInstrumentChalice:
             mock_get_tracer.return_value = mock_tracer
 
             instrument_chalice(mock_app)
-            middleware_func = mock_app.middleware.call_args[0][1]
+            middleware_func = captured_middleware[0]
             middleware_func(mock_event, mock_get_response)
 
             mock_span.set_attribute.assert_any_call("request.is_health_check", True)

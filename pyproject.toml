@@ -166,10 +166,10 @@ pytest-cov = "^4.0.0"
 pytest-mock = "^3.10.0"
 ruff = "^0.1.0"
 pre-commit = "^3.0.0"
-
-# Ruff Configuration
 httpx = ">=0.23,<0.28"
 fastapi = ">=0.100.0"
+
+# Ruff Configuration
 [tool.ruff]
 # Linha de comprimento máxima
 line-length = 100
@@ -188,7 +188,7 @@ exclude = [
     ".ruff_cache",
 ]
 
-# Selecionar regras de linting
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -205,16 +205,12 @@ select = [
     "RET", # flake8-return
     "RUF", # Ruff-specific rules
 ]
-
-# Ignorar regras específicas
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
     "ARG001", # unused function argument
     "ARG002", # unused method argument
 ]
-
-# Permitir fix automático para todas as regras
 fixable = ["ALL"]
 unfixable = []
 

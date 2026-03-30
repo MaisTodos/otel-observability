@@ -24,7 +24,7 @@ def mock_datadog_agent():
     def receive_loop():
         while True:
             try:
-                data, addr = sock.recvfrom(1024)
+                data, _addr = sock.recvfrom(1024)
                 received_messages.append(data.decode("utf-8"))
             except TimeoutError:
                 break

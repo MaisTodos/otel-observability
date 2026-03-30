@@ -38,3 +38,13 @@ repos:
         name: Check for merge conflicts
       - id: debug-statements
         name: Check for debugger imports
+
+  # Testes unitários (rápidos, sem integração)
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: pytest (unit tests)
+        entry: uv run --all-extras pytest tests/unit -x -q --no-cov
+        language: system
+        pass_filenames: false
+        always_run: true

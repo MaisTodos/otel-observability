@@ -116,26 +116,22 @@ except ImportError:
 __version__ = "0.1.0"
 
 __all__ = [
-    # Tracer
-    "init_telemetry",
-    "shutdown_telemetry",
-    "trace",
-    "get_current_span",
-    "get_tracer",
-    "get_current_trace_id",
-    "get_current_span_id",
-    # Logging
-    "get_logger",
-    "configure_logging",
-    "set_log_context",
-    "get_log_context",
-    "clear_log_context",
-    # Config
+    "RequestLoggingMiddleware",
     "TelemetryConfig",
-    # Framework integrations
+    "clear_log_context",
+    "configure_logging",
+    "get_current_span",
+    "get_current_span_id",
+    "get_current_trace_id",
+    "get_log_context",
+    "get_logger",
+    "get_tracer",
+    "init_telemetry",
     "instrument_fastapi",
     "instrument_lambda_handler",
-    "RequestLoggingMiddleware",
+    "set_log_context",
+    "shutdown_telemetry",
+    "trace",
 ]
 
 # Add Chalice exports if available
@@ -146,11 +142,11 @@ if CHALICE_AVAILABLE:
 if METRICS_AVAILABLE:
     __all__.extend(
         [
-            "increment_counter",
-            "set_gauge",
-            "record_histogram",
-            "record_distribution",
-            "track_funnel_step",
             "flush",
+            "increment_counter",
+            "record_distribution",
+            "record_histogram",
+            "set_gauge",
+            "track_funnel_step",
         ]
     )
