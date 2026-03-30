@@ -1,0 +1,23 @@
+name: Validate Release PR Title
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  validate-title:
+    name: Validate PR title (vX.X.X)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title format
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          if [[ ! "$TITLE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Título da PR '$TITLE' não segue o formato obrigatório."
+            echo ""
+            echo "PRs targeting master must use semantic versioning as title."
+            echo "Exemplos válidos: v1.0.0, v2.3.1, v0.10.0"
+            exit 1
+          fi
+          echo "✅ Título '$TITLE' válido."
