@@ -5,6 +5,14 @@
 
 Biblioteca Python simplificada de **OpenTelemetry** para **FastAPI**, **AWS Lambda** e **Chalice** com integração nativa ao **Datadog**.
 
+> **Aviso de Visibilidade**
+>
+> Este repositório está temporariamente público para facilitar a configuração do pipeline de deploy, sem a necessidade de configurar autenticação SSH no CI/CD.
+>
+> Uma auditoria de segurança foi realizada antes desta mudança: nenhuma credencial, segredo ou referência interna sensível foi encontrada no código-fonte ou no histórico do git. Todos os valores sensíveis são injetados exclusivamente via variáveis de ambiente em tempo de execução.
+>
+> O repositório será tornado privado novamente assim que a autenticação do pipeline estiver devidamente configurada.
+
 ---
 
 ## 📖 Documentação
