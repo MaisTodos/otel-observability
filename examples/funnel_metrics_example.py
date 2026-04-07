@@ -232,7 +232,7 @@ def simulate_multiple_checkouts(num_checkouts: int = 10):
     }
 
     for i in range(num_checkouts):
-        cart_id = f"cart_{i+1}"
+        cart_id = f"cart_{i + 1}"
         user_id = f"user_{random.randint(1, 100)}"
         amount = round(random.uniform(10.0, 100.0), 2)
         payment_method = random.choice(payment_methods)

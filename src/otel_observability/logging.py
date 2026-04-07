@@ -9,9 +9,9 @@ from typing import Any
 from .tracer import get_current_span_id, get_current_trace_id
 
 # ContextVar para armazenar contexto customizado de log
-_log_context: ContextVar[dict[str, Any]] = ContextVar(
+_log_context: ContextVar[dict[str, Any] | None] = ContextVar(
     "log_context",
-    default={},
+    default=None,
 )
 
 _logger_provider: Any = None
