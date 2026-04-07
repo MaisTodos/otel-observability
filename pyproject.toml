@@ -56,14 +56,6 @@ all = [
     "chalice>=1.0.0",
     "datadog>=0.45.0",
 ]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "pytest-mock>=3.10.0",
-    "ruff>=0.1.0",
-    "pre-commit>=3.0.0",
-]
 
 [build-system]
 requires = ["setuptools>=68.0.0", "wheel"]
@@ -72,105 +64,19 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# Configuração Poetry (alternativa)
-[tool.poetry]
-name = "otel-observability"
-version = "0.1.0"
-description = "OpenTelemetry wrapper for FastAPI and AWS Lambda with Datadog"
-authors = ["Your Team <team@company.com>"]
-packages = [{include = "otel_observability", from = "src"}]
-
-[tool.poetry.dependencies]
-python = "^3.10"
-opentelemetry-api = "^1.20.0"
-opentelemetry-sdk = "^1.20.0"
-opentelemetry-exporter-otlp-proto-http = "^1.20.0"
-opentelemetry-instrumentation = "^0.41b0"
-
-# Optional dependencies - FastAPI
-opentelemetry-instrumentation-fastapi = {version = "^0.41b0", optional = true}
-fastapi = {version = "^0.100.0", optional = true}
-
-# Optional dependencies - HTTP clients
-opentelemetry-instrumentation-httpx = {version = "^0.41b0", optional = true}
-opentelemetry-instrumentation-requests = {version = "^0.41b0", optional = true}
-
-# Optional dependencies - Databases
-opentelemetry-instrumentation-sqlalchemy = {version = "^0.41b0", optional = true}
-opentelemetry-instrumentation-psycopg2 = {version = "^0.41b0", optional = true}
-opentelemetry-instrumentation-pymongo = {version = "^0.41b0", optional = true}
-
-# Optional dependencies - Cache/Queue
-opentelemetry-instrumentation-redis = {version = "^0.41b0", optional = true}
-
-# Optional dependencies - AWS
-opentelemetry-instrumentation-boto3sqs = {version = "^0.41b0", optional = true}
-opentelemetry-instrumentation-botocore = {version = "^0.41b0", optional = true}
-opentelemetry-propagator-aws-xray = {version = "^1.0.0", optional = true}
-
-# Optional dependencies - Metrics
-datadog = {version = "^0.45.0", optional = true}
-
-[tool.poetry.extras]
-fastapi = [
-    "opentelemetry-instrumentation-fastapi",
-    "fastapi",
-    "opentelemetry-instrumentation-httpx",
-    "opentelemetry-instrumentation-requests",
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0.0",
+    "httpx>=0.23,<0.28",
+    "fastapi>=0.100.0",
 ]
-lambda = [
-    "opentelemetry-propagator-aws-xray",
-    "opentelemetry-instrumentation-boto3sqs",
-    "opentelemetry-instrumentation-botocore",
-]
-database = [
-    "opentelemetry-instrumentation-sqlalchemy",
-    "opentelemetry-instrumentation-psycopg2",
-    "opentelemetry-instrumentation-pymongo",
-]
-redis = [
-    "opentelemetry-instrumentation-redis",
-]
-http = [
-    "opentelemetry-instrumentation-httpx",
-    "opentelemetry-instrumentation-requests",
-]
-chalice = [
-    "chalice",
-]
-metrics = [
-    "datadog",
-]
-all = [
-    "opentelemetry-instrumentation-fastapi",
-    "fastapi",
-    "opentelemetry-instrumentation-httpx",
-    "opentelemetry-instrumentation-requests",
-    "opentelemetry-instrumentation-sqlalchemy",
-    "opentelemetry-instrumentation-psycopg2",
-    "opentelemetry-instrumentation-pymongo",
-    "opentelemetry-instrumentation-redis",
-    "opentelemetry-instrumentation-boto3sqs",
-    "opentelemetry-instrumentation-botocore",
-    "opentelemetry-propagator-aws-xray",
-    "chalice",
-    "datadog",
-]
-
-[tool.poetry.group.dev]
-optional = false
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.0.0"
-pytest-asyncio = "^0.21.0"
-pytest-cov = "^4.0.0"
-pytest-mock = "^3.10.0"
-ruff = "^0.1.0"
-pre-commit = "^3.0.0"
 
 # Ruff Configuration
-httpx = ">=0.23,<0.28"
-fastapi = ">=0.100.0"
 [tool.ruff]
 # Linha de comprimento máxima
 line-length = 100
@@ -189,7 +95,7 @@ exclude = [
     ".ruff_cache",
 ]
 
-# Selecionar regras de linting
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -206,16 +112,12 @@ select = [
     "RET", # flake8-return
     "RUF", # Ruff-specific rules
 ]
-
-# Ignorar regras específicas
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
     "ARG001", # unused function argument
     "ARG002", # unused method argument
 ]
-
-# Permitir fix automático para todas as regras
 fixable = ["ALL"]
 unfixable = []
 
@@ -252,6 +154,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "--cov-fail-under=80",
 ]
 markers = [
     "unit: Unit tests",

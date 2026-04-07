@@ -2,13 +2,15 @@
 
 import json
 import logging
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from otel_observability.logging import (
+    FlattenAttributesLogRecordProcessor,
     JSONFormatter,
     TraceContextFilter,
+    _flatten_value,
     clear_log_context,
     configure_logging,
     get_log_context,
@@ -221,6 +223,72 @@ class TestConfigureLogging:
 
         # Verificar que tem TraceContextFilter
         assert any(isinstance(f, TraceContextFilter) for f in handlers[0].filters)
+
+
+@pytest.mark.unit
+class TestFlattenValue:
+    """Testes para _flatten_value."""
+
+    def test_primitive_string(self):
+        result = {}
+        _flatten_value("key", "value", result)
+        assert result == {"key": "value"}
+
+    def test_primitive_int(self):
+        result = {}
+        _flatten_value("count", 42, result)
+        assert result == {"count": 42}
+
+    def test_none_value(self):
+        result = {}
+        _flatten_value("key", None, result)
+        assert result == {"key": None}
+
+    def test_nested_dict(self):
+        result = {}
+        _flatten_value("root", {"child": "val"}, result)
+        assert result == {"root.child": "val"}
+
+    def test_non_primitive_serialized(self):
+        result = {}
+        _flatten_value("obj", object(), result)
+        assert "obj" in result
+        assert isinstance(result["obj"], str)
+
+    def test_max_depth_truncates(self):
+        result = {}
+        _flatten_value("deep", {"a": {"b": {"c": "v"}}}, result, depth=3)
+        assert "deep" in result
+
+
+@pytest.mark.unit
+class TestFlattenAttributesProcessor:
+    """Testes para FlattenAttributesLogRecordProcessor."""
+
+    def test_on_emit_no_attributes(self):
+        processor = FlattenAttributesLogRecordProcessor()
+        inner = MagicMock()
+        inner.attributes = None
+        log_record = MagicMock()
+        log_record.log_record = inner
+        processor.on_emit(log_record)  # deve retornar sem erro
+
+    def test_on_emit_flattens_attributes(self):
+        processor = FlattenAttributesLogRecordProcessor()
+        inner = MagicMock()
+        inner.attributes = {"key": "value", "nested": "flat"}
+        log_record = MagicMock()
+        log_record.log_record = inner
+        processor.on_emit(log_record)
+        assert inner.attributes is not None
+
+    def test_shutdown(self):
+        processor = FlattenAttributesLogRecordProcessor()
+        processor.shutdown()  # deve retornar sem erro
+
+    def test_force_flush(self):
+        processor = FlattenAttributesLogRecordProcessor()
+        assert processor.force_flush() is True
 
 
 @pytest.mark.unit

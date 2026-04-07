@@ -64,6 +64,18 @@ def _reset_log_context() -> Generator[None, None, None]:
     clear_log_context()
 
 
+@pytest.fixture(name="reset_metrics_module")
+def _reset_metrics_module() -> Generator[None, None, None]:
+    """Fixture para resetar o estado global do módulo de métricas entre testes."""
+    from otel_observability import metrics
+
+    metrics._statsd_client = None
+    metrics._config = None
+    yield
+    metrics._statsd_client = None
+    metrics._config = None
+
+
 @pytest.fixture
 def mock_otlp_exporter() -> Generator[MagicMock, None, None]:
     """Fixture para mockar o OTLP exporter."""

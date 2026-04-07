@@ -2,21 +2,6 @@
 # See https://pre-commit.com for more information
 
 repos:
-  # Ruff: linter e formatter rápido em Rust
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
-    hooks:
-      # Ruff linter
-      - id: ruff
-        name: ruff (linter)
-        args: [--fix, --exit-non-zero-on-fix]
-        types_or: [python, pyi]
-
-      # Ruff formatter
-      - id: ruff-format
-        name: ruff (formatter)
-        types_or: [python, pyi]
-
   # Verificar arquivos YAML
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -38,3 +23,28 @@ repos:
         name: Check for merge conflicts
       - id: debug-statements
         name: Check for debugger imports
+
+  # Hooks locais usando poetry (mesma versão do projeto)
+  - repo: local
+    hooks:
+      # Ruff linter
+      - id: ruff
+        name: ruff (linter)
+        entry: uv run ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types_or: [python, pyi]
+
+      # Ruff formatter
+      - id: ruff-format
+        name: ruff (formatter)
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+
+      # Testes unitários (rápidos, sem integração)
+      - id: pytest-unit
+        name: pytest (unit tests)
+        entry: uv run pytest tests/unit -x -q --no-cov
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -1,6 +1,6 @@
 """Unit tests for metrics module."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -20,26 +20,16 @@ def mock_statsd_client():
     return mock_client
 
 
-@pytest.fixture
-def _reset_metrics_module():
-    """Reset metrics module state between tests."""
-    metrics._statsd_client = None
-    metrics._config = None
-    yield
-    metrics._statsd_client = None
-    metrics._config = None
-
-
 class TestMetricsClient:
     """Test DogStatsD client initialization."""
 
-    @patch("otel_observability.metrics.DogStatsd")
-    @patch("otel_observability.metrics.TelemetryConfig")
-    def test_client_initialization_success(
-        self, mock_config_class, mock_dogstatsd, reset_metrics_module
-    ):
+    def test_client_initialization_success(self, reset_metrics_module):
         """Test successful client initialization."""
-        # Setup mock config
+        mock_client = Mock()
+        mock_dogstatsd = Mock(return_value=mock_client)
+        mock_datadog_module = MagicMock()
+        mock_datadog_module.DogStatsd = mock_dogstatsd
+
         mock_config = Mock()
         mock_config.dogstatsd_enabled = True
         mock_config.dogstatsd_host = "localhost"
@@ -47,39 +37,37 @@ class TestMetricsClient:
         mock_config.environment = "test"
         mock_config.service_name = "test-service"
         mock_config.service_version = "1.0.0"
-        mock_config_class.from_env.return_value = mock_config
 
-        # Setup mock client
-        mock_client = Mock()
-        mock_dogstatsd.return_value = mock_client
+        with (
+            patch.dict("sys.modules", {"datadog": mock_datadog_module}),
+            patch("otel_observability.config.TelemetryConfig") as mock_config_class,
+        ):
+            mock_config_class.from_env.return_value = mock_config
+            client = metrics._get_statsd_client()
 
-        # Test
-        client = metrics._get_statsd_client()
-
-        # Assertions
         assert client is not None
         mock_dogstatsd.assert_called_once()
         assert mock_dogstatsd.call_args[1]["host"] == "localhost"
         assert mock_dogstatsd.call_args[1]["port"] == 8125
 
-    @patch("otel_observability.metrics.TelemetryConfig")
-    def test_client_disabled(self, mock_config_class, reset_metrics_module):
+    def test_client_disabled(self, reset_metrics_module):
         """Test client when DogStatsD is disabled."""
-        # Setup mock config
+        mock_datadog_module = MagicMock()
         mock_config = Mock()
         mock_config.dogstatsd_enabled = False
-        mock_config_class.from_env.return_value = mock_config
 
-        # Test
-        client = metrics._get_statsd_client()
+        with (
+            patch.dict("sys.modules", {"datadog": mock_datadog_module}),
+            patch("otel_observability.config.TelemetryConfig") as mock_config_class,
+        ):
+            mock_config_class.from_env.return_value = mock_config
+            client = metrics._get_statsd_client()
 
-        # Assertions
         assert client is None
 
-    @patch("otel_observability.metrics.TelemetryConfig")
     def test_client_import_error(self, reset_metrics_module):
         """Test client when datadog library is not installed."""
-        with patch("otel_observability.metrics.DogStatsd", side_effect=ImportError()):
+        with patch.dict("sys.modules", {"datadog": None}):
             client = metrics._get_statsd_client()
             assert client is None
 
@@ -87,7 +75,7 @@ class TestMetricsClient:
 class TestUnifiedTags:
     """Test unified service tags."""
 
-    @patch("otel_observability.metrics.TelemetryConfig")
+    @patch("otel_observability.config.TelemetryConfig")
     def test_get_unified_tags(self, mock_config_class, reset_metrics_module):
         """Test unified tags generation."""
         # Setup mock config
@@ -243,7 +231,7 @@ class TestSetGauge:
         mock_statsd_client.gauge.assert_called_once()
         call_args = mock_statsd_client.gauge.call_args
         assert call_args[0][0] == "app.active_users"
-        assert call_args[0][1] == 150
+        assert call_args[1]["value"] == 150
         assert "region:us-east-1" in call_args[1]["tags"]
 
 
@@ -263,7 +251,7 @@ class TestRecordHistogram:
         mock_statsd_client.histogram.assert_called_once()
         call_args = mock_statsd_client.histogram.call_args
         assert call_args[0][0] == "app.latency"
-        assert call_args[0][1] == 0.125
+        assert call_args[1]["value"] == 0.125
         assert "endpoint:/api/users" in call_args[1]["tags"]
 
 
@@ -283,7 +271,7 @@ class TestRecordDistribution:
         mock_statsd_client.distribution.assert_called_once()
         call_args = mock_statsd_client.distribution.call_args
         assert call_args[0][0] == "app.latency"
-        assert call_args[0][1] == 0.125
+        assert call_args[1]["value"] == 0.125
         assert "region:us-east-1" in call_args[1]["tags"]
 
 

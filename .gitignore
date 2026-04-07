@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+*.pyc
 *.py[cod]
 *$py.class
 
@@ -135,3 +136,9 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+__pycache__/
+*/__pycache__/
+**/__pycache__/
+
+src/otel_observability/__pycache__/
