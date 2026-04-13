@@ -19,7 +19,7 @@ fastapi = [
     "opentelemetry-instrumentation-requests>=0.41b0",
 ]
 lambda = [
-    "opentelemetry-propagator-aws-xray>=1.0.0",
+    "opentelemetry-propagator-aws-xray>=1.0.2",
     "opentelemetry-instrumentation-boto3sqs>=0.41b0",
     "opentelemetry-instrumentation-botocore>=0.41b0",
 ]
@@ -52,7 +52,7 @@ all = [
     "opentelemetry-instrumentation-redis>=0.41b0",
     "opentelemetry-instrumentation-boto3sqs>=0.41b0",
     "opentelemetry-instrumentation-botocore>=0.41b0",
-    "opentelemetry-propagator-aws-xray>=1.0.0",
+    "opentelemetry-propagator-aws-xray>=1.0.2",
     "chalice>=1.0.0",
     "datadog>=0.45.0",
 ]
