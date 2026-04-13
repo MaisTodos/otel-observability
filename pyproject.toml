@@ -16,7 +16,7 @@ fastapi = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "fastapi>=0.100.0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
-    "opentelemetry-instrumentation-requests>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.62b0",
 ]
 lambda = [
     "opentelemetry-propagator-aws-xray>=1.0.0",
@@ -33,7 +33,7 @@ redis = [
 ]
 http = [
     "opentelemetry-instrumentation-httpx>=0.41b0",
-    "opentelemetry-instrumentation-requests>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.62b0",
 ]
 chalice = [
     "chalice>=1.0.0",
@@ -45,7 +45,7 @@ all = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "fastapi>=0.100.0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
-    "opentelemetry-instrumentation-requests>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.62b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
     "opentelemetry-instrumentation-psycopg2>=0.41b0",
     "opentelemetry-instrumentation-pymongo>=0.41b0",
