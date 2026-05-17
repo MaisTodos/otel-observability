@@ -239,10 +239,15 @@ class TestFlattenValue:
         _flatten_value("count", 42, result)
         assert result == {"count": 42}
 
-    def test_none_value(self):
+    def test_none_value_is_dropped(self):
         result = {}
         _flatten_value("key", None, result)
-        assert result == {"key": None}
+        assert result == {}
+
+    def test_none_value_inside_nested_dict_is_dropped(self):
+        result = {}
+        _flatten_value("root", {"keep": "x", "drop": None}, result)
+        assert result == {"root.keep": "x"}
 
     def test_nested_dict(self):
         result = {}

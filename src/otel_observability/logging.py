@@ -222,13 +222,21 @@ def configure_logging(
 
 
 def _flatten_value(prefix: str, value: Any, result: dict, depth: int = 0) -> None:
-    """Recursively flatten nested dicts into dot-notation keys."""
+    """Recursively flatten nested dicts into dot-notation keys.
+
+    None values are dropped: the OTLP attribute protocol does not accept None,
+    and including them causes the OTel SDK to emit a warning per attribute
+    ("Invalid type NoneType for attribute ..."), which is itself shipped via
+    OTLP and pollutes the log stream.
+    """
+    if value is None:
+        return
     if depth >= 3:
         result[prefix] = str(value)
     elif isinstance(value, dict):
         for k, v in value.items():
             _flatten_value(f"{prefix}.{k}", v, result, depth + 1)
-    elif isinstance(value, str | int | float | bool) or value is None:
+    elif isinstance(value, str | int | float | bool):
         result[prefix] = value
     else:
         result[prefix] = str(value)
