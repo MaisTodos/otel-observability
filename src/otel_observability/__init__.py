@@ -150,7 +150,7 @@ if CHALICE_AVAILABLE:
 
 # Add Django exports if available
 if DJANGO_AVAILABLE:
-    __all__.extend(["instrument_django", "DjangoRequestLoggingMiddleware"])
+    __all__.extend(["DjangoRequestLoggingMiddleware", "instrument_django"])
 
 # Add Metrics exports if available
 if METRICS_AVAILABLE:

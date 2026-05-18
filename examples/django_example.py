@@ -62,8 +62,6 @@ Para executar:
 # PASSO 3: Middleware customizado para contexto de negócio (opcional)
 # ==============================================================================
 
-import logging
-
 from otel_observability import get_logger, set_log_context, trace
 from otel_observability.django import (
     DjangoRequestLoggingMiddleware,
