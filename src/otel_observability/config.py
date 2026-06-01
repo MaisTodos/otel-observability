@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import os
+from typing import Any
 import warnings
 
 
@@ -142,3 +143,62 @@ class TelemetryConfig:
 
         if not 0.0 <= self.sample_rate <= 1.0:
             raise ValueError(f"sample_rate must be between 0.0 and 1.0, got {self.sample_rate}")
+
+
+# Chaves de ambiente que a lib consome direto de os.environ. Mantidas aqui para
+# que os serviços não precisem replicar a lista no próprio Pydantic Settings.
+OTEL_ENV_KEYS = (
+    "OTEL_SERVICE_NAME",
+    "OTEL_ENVIRONMENT",
+    "OTEL_SERVICE_VERSION",
+    "OTEL_LOG_FORMAT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "DD_API_KEY",
+)
+
+
+def seed_otel_env(source: Any = None, **overrides: str) -> dict[str, str]:
+    """Popula ``os.environ`` com as chaves OTEL a partir de um objeto de settings.
+
+    A lib lê a configuração direto de ``os.environ``, mas os serviços normalmente
+    configuram via Pydantic Settings (que carrega o ``.env`` sem exportar para o
+    ambiente do processo). Este helper faz a ponte: extrai as chaves de
+    ``OTEL_ENV_KEYS`` do ``source`` e injeta no ``os.environ`` via ``setdefault``,
+    eliminando o boilerplate de ``_OTEL_ENV_KEYS`` + ``model_post_init`` replicado
+    em cada serviço.
+
+    Usa ``setdefault`` de propósito: env real do processo tem precedência sobre o
+    valor do settings.
+
+    Args:
+        source: objeto com atributos OTEL (ex: Pydantic Settings) ou um ``dict``.
+        **overrides: valores explícitos que têm precedência sobre o ``source``.
+
+    Returns:
+        Dicionário com as chaves efetivamente aplicadas (úteis para log/teste).
+
+    Example:
+        >>> from otel_observability import seed_otel_env
+        >>> seed_otel_env(settings)
+    """
+    applied: dict[str, str] = {}
+    for key in OTEL_ENV_KEYS:
+        if key in overrides:
+            value = overrides[key]
+        elif isinstance(source, dict):
+            value = source.get(key)
+        elif source is not None:
+            value = getattr(source, key, None)
+        else:
+            value = None
+
+        if value is None:
+            continue
+        value = str(value)
+        if not value:
+            continue
+        os.environ.setdefault(key, value)
+        applied[key] = value
+    return applied
