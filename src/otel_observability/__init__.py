@@ -61,11 +61,13 @@ Example (Manual Tracing):
 
 # AWS Lambda integration (module always exists, no optional deps)
 from .aws_lambda import instrument_lambda_handler
-from .config import TelemetryConfig
+from .config import OTEL_ENV_KEYS, TelemetryConfig, seed_otel_env
 
 # FastAPI integration (module always exists, but may raise ImportError if deps missing)
 from .fastapi import RequestLoggingMiddleware, instrument_fastapi
 from .logging import (
+    DEFAULT_SENSITIVE_KEYS,
+    RedactionFilter,
     clear_log_context,
     configure_logging,
     get_log_context,
@@ -116,6 +118,9 @@ except ImportError:
 __version__ = "0.1.0"
 
 __all__ = [
+    "DEFAULT_SENSITIVE_KEYS",
+    "OTEL_ENV_KEYS",
+    "RedactionFilter",
     "RequestLoggingMiddleware",
     "TelemetryConfig",
     "clear_log_context",
@@ -129,6 +134,7 @@ __all__ = [
     "init_telemetry",
     "instrument_fastapi",
     "instrument_lambda_handler",
+    "seed_otel_env",
     "set_log_context",
     "shutdown_telemetry",
     "trace",
