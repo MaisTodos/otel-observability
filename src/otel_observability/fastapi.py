@@ -1,5 +1,6 @@
 """FastAPI integration with automatic instrumentation and distributed tracing."""
 
+from collections.abc import Iterable
 import logging
 import time
 
@@ -30,6 +31,7 @@ def instrument_fastapi(
     json_logs: bool = False,
     excluded_urls: str | None = None,
     auto_instrument_libs: bool = True,
+    redact_keys: Iterable[str] | None = None,
 ):
     """
     Instrumenta uma aplicação FastAPI com OpenTelemetry.
@@ -90,7 +92,7 @@ def instrument_fastapi(
     # If configure_logging runs after, its handlers.clear() removes that handler
     # and logs never reach Datadog.
     if configure_logs:
-        configure_logging(level=cfg.log_level, json_format=json_logs)
+        configure_logging(level=cfg.log_level, json_format=json_logs, redact_keys=redact_keys)
 
     init_telemetry(cfg)
 

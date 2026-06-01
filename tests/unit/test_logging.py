@@ -305,3 +305,82 @@ class TestGetLogger:
         logger = get_logger("test.module")
         assert isinstance(logger, logging.Logger)
         assert logger.name == "test.module"
+
+
+@pytest.mark.unit
+class TestRedactionFilter:
+    """Testes para o RedactionFilter (mascaramento de dados sensíveis)."""
+
+    @staticmethod
+    def _record(**extra):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "msg", None, None)
+        for key, value in extra.items():
+            setattr(record, key, value)
+        return record
+
+    def test_redacts_default_sensitive_top_level(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(access_token="super-secret")
+        RedactionFilter().filter(record)
+        assert record.access_token == "*****"
+
+    def test_redacts_nested_props(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(
+            props={"headers": {"Authorization": "Bearer x"}, "ok": 1},
+        )
+        RedactionFilter().filter(record)
+        assert record.props["headers"]["Authorization"] == "*****"
+        assert record.props["ok"] == 1
+
+    def test_redacts_inside_list(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(props={"items": [{"password": "p"}, {"keep": "v"}]})
+        RedactionFilter().filter(record)
+        assert record.props["items"][0]["password"] == "*****"
+        assert record.props["items"][1]["keep"] == "v"
+
+    def test_non_sensitive_untouched(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(props={"account_id": "123", "amount": 100})
+        RedactionFilter().filter(record)
+        assert record.props == {"account_id": "123", "amount": 100}
+
+    def test_custom_keys_extend_defaults(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(custom_secret="x", access_token="y")
+        RedactionFilter({"custom_secret"}).filter(record)
+        assert record.custom_secret == "*****"
+        assert record.access_token == "*****"
+
+    def test_case_insensitive(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(props={"AUTHORIZATION": "x"})
+        RedactionFilter().filter(record)
+        assert record.props["AUTHORIZATION"] == "*****"
+
+    def test_reserved_logrecord_attrs_untouched(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(props={"ok": 1})
+        RedactionFilter().filter(record)
+        assert record.msg == "msg"
+        assert record.levelname == "INFO"
+
+    def test_configure_logging_applies_redaction(self, capsys, reset_log_context):
+        """Integração: logs emitidos via configure_logging saem mascarados."""
+        logger_name = "test.redaction"
+        configure_logging(level="INFO", json_format=True, logger_name=logger_name)
+        logger = get_logger(logger_name)
+        logger.info("evento", extra={"props": {"password": "p", "account_id": "1"}})
+
+        captured = capsys.readouterr().out.strip().splitlines()
+        payload = json.loads(captured[-1])
+        assert payload["props"]["password"] == "*****"
+        assert payload["props"]["account_id"] == "1"

@@ -199,3 +199,58 @@ class TestTelemetryConfig:
         with patch.dict(os.environ, {}, clear=True):  # noqa: SIM117
             with pytest.warns(UserWarning, match="No OTLP traces endpoint configured"):
                 TelemetryConfig.from_env()
+
+
+@pytest.mark.unit
+class TestSeedOtelEnv:
+    """Testes para seed_otel_env."""
+
+    def test_seed_from_object(self):
+        """Popula os.environ a partir de um objeto de settings."""
+        from otel_observability.config import seed_otel_env
+
+        class Settings:
+            OTEL_SERVICE_NAME = "banking-credit-api"
+            DD_API_KEY = "dd-key"
+
+        with patch.dict(os.environ, {}, clear=True):
+            applied = seed_otel_env(Settings())
+            assert os.environ["OTEL_SERVICE_NAME"] == "banking-credit-api"
+            assert os.environ["DD_API_KEY"] == "dd-key"
+            assert applied["OTEL_SERVICE_NAME"] == "banking-credit-api"
+
+    def test_seed_from_dict(self):
+        """Aceita também um dicionário como fonte."""
+        from otel_observability.config import seed_otel_env
+
+        with patch.dict(os.environ, {}, clear=True):
+            seed_otel_env({"OTEL_ENVIRONMENT": "production"})
+            assert os.environ["OTEL_ENVIRONMENT"] == "production"
+
+    def test_seed_skips_empty_and_missing(self):
+        """Valores vazios ou ausentes não são injetados."""
+        from otel_observability.config import seed_otel_env
+
+        class Settings:
+            OTEL_SERVICE_NAME = ""
+
+        with patch.dict(os.environ, {}, clear=True):
+            seed_otel_env(Settings())
+            assert "OTEL_SERVICE_NAME" not in os.environ
+            assert "DD_API_KEY" not in os.environ
+
+    def test_seed_does_not_override_existing_env(self):
+        """setdefault: env real do processo tem precedência sobre settings."""
+        from otel_observability.config import seed_otel_env
+
+        with patch.dict(os.environ, {"OTEL_SERVICE_NAME": "real"}, clear=True):
+            seed_otel_env({"OTEL_SERVICE_NAME": "from-settings"})
+            assert os.environ["OTEL_SERVICE_NAME"] == "real"
+
+    def test_overrides_take_precedence_over_source(self):
+        """Overrides explícitos vencem o valor do source."""
+        from otel_observability.config import seed_otel_env
+
+        with patch.dict(os.environ, {}, clear=True):
+            seed_otel_env({"OTEL_SERVICE_NAME": "from-source"}, OTEL_SERVICE_NAME="override")
+            assert os.environ["OTEL_SERVICE_NAME"] == "override"
