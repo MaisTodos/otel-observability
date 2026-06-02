@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 import logging
+import re
 import time
 
 try:
@@ -24,6 +25,23 @@ from .tracer import init_telemetry
 logger = logging.getLogger(__name__)
 
 
+class _AccessLogPathFilter(logging.Filter):
+    """Descarta logs do uvicorn.access cujas URLs estão em excluded_urls.
+
+    Evita que cada serviço precise declarar o próprio filtro de health check.
+    Instalado automaticamente pelo instrument_fastapi a partir do excluded_urls.
+    """
+
+    def __init__(self, excluded_urls: str) -> None:
+        super().__init__()
+        # excluded_urls pode vir separado por vírgula ou pipe ("/ping", "/health|/metrics").
+        self._paths = [path.strip() for path in re.split(r"[,|]", excluded_urls) if path.strip()]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not any(path in message for path in self._paths)
+
+
 def instrument_fastapi(
     app,
     config: TelemetryConfig | None = None,
@@ -32,6 +50,7 @@ def instrument_fastapi(
     excluded_urls: str | None = None,
     auto_instrument_libs: bool = True,
     redact_keys: Iterable[str] | None = None,
+    suppress_access_logs: bool = True,
 ):
     """
     Instrumenta uma aplicação FastAPI com OpenTelemetry.
@@ -107,6 +126,9 @@ def instrument_fastapi(
         client_request_hook=None,
         client_response_hook=None,
     )
+
+    if excluded_urls and suppress_access_logs:
+        logging.getLogger("uvicorn.access").addFilter(_AccessLogPathFilter(excluded_urls))
 
     logger.info(
         f"FastAPI instrumented: service={cfg.service_name}, "
