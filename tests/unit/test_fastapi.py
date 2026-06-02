@@ -1,5 +1,6 @@
 """Testes unitários para o módulo fastapi."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
@@ -72,19 +73,24 @@ class TestInstrumentFastapi:
         """Testa instrumentação com URLs excluídas."""
         mock_app = MagicMock()
         mock_instrumentor = MagicMock()
+        access_logger = logging.getLogger("uvicorn.access")
+        before = list(access_logger.filters)
 
-        with (
-            patch("otel_observability.fastapi.FastAPIInstrumentor", mock_instrumentor),
-            patch("otel_observability.fastapi.init_telemetry"),
-            patch("otel_observability.fastapi.configure_logging"),
-            patch("otel_observability.fastapi.auto_instrument"),
-        ):
-            mock_instrumentor.instrument_app = MagicMock()
+        try:
+            with (
+                patch("otel_observability.fastapi.FastAPIInstrumentor", mock_instrumentor),
+                patch("otel_observability.fastapi.init_telemetry"),
+                patch("otel_observability.fastapi.configure_logging"),
+                patch("otel_observability.fastapi.auto_instrument"),
+            ):
+                mock_instrumentor.instrument_app = MagicMock()
 
-            instrument_fastapi(mock_app, excluded_urls="/health|/metrics")
+                instrument_fastapi(mock_app, excluded_urls="/health|/metrics")
 
-            call_args = mock_instrumentor.instrument_app.call_args
-            assert call_args[1]["excluded_urls"] == "/health|/metrics"
+                call_args = mock_instrumentor.instrument_app.call_args
+                assert call_args[1]["excluded_urls"] == "/health|/metrics"
+        finally:
+            access_logger.filters = before
 
     @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI instrumentation not available")
     def test_instrument_fastapi_without_auto_instrument(self):
@@ -103,6 +109,93 @@ class TestInstrumentFastapi:
             instrument_fastapi(mock_app, auto_instrument_libs=False)
 
             mock_auto_instrument.assert_not_called()
+
+    @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI instrumentation not available")
+    def test_instrument_fastapi_suppresses_access_logs(self):
+        """excluded_urls instala o filtro de supressão no uvicorn.access."""
+        from otel_observability.fastapi import _AccessLogPathFilter
+
+        mock_app = MagicMock()
+        mock_instrumentor = MagicMock()
+        access_logger = logging.getLogger("uvicorn.access")
+        before = list(access_logger.filters)
+
+        def count_filter():
+            return sum(isinstance(f, _AccessLogPathFilter) for f in access_logger.filters)
+
+        before_count = count_filter()
+        try:
+            with (
+                patch("otel_observability.fastapi.FastAPIInstrumentor", mock_instrumentor),
+                patch("otel_observability.fastapi.init_telemetry"),
+                patch("otel_observability.fastapi.configure_logging"),
+                patch("otel_observability.fastapi.auto_instrument"),
+            ):
+                mock_instrumentor.instrument_app = MagicMock()
+                instrument_fastapi(mock_app, excluded_urls="/ping")
+
+            assert count_filter() == before_count + 1
+        finally:
+            access_logger.filters = before
+
+    @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI instrumentation not available")
+    def test_instrument_fastapi_suppress_access_logs_disabled(self):
+        """suppress_access_logs=False não instala o filtro."""
+        from otel_observability.fastapi import _AccessLogPathFilter
+
+        mock_app = MagicMock()
+        mock_instrumentor = MagicMock()
+        access_logger = logging.getLogger("uvicorn.access")
+        before = list(access_logger.filters)
+
+        def count_filter():
+            return sum(isinstance(f, _AccessLogPathFilter) for f in access_logger.filters)
+
+        before_count = count_filter()
+        try:
+            with (
+                patch("otel_observability.fastapi.FastAPIInstrumentor", mock_instrumentor),
+                patch("otel_observability.fastapi.init_telemetry"),
+                patch("otel_observability.fastapi.configure_logging"),
+                patch("otel_observability.fastapi.auto_instrument"),
+            ):
+                mock_instrumentor.instrument_app = MagicMock()
+                instrument_fastapi(mock_app, excluded_urls="/ping", suppress_access_logs=False)
+
+            assert count_filter() == before_count
+        finally:
+            access_logger.filters = before
+
+
+@pytest.mark.unit
+class TestAccessLogPathFilter:
+    """Testes para o filtro de supressão de access log por path."""
+
+    @staticmethod
+    def _access_record(message: str) -> logging.LogRecord:
+        return logging.LogRecord("uvicorn.access", logging.INFO, "p", 1, message, None, None)
+
+    def test_drops_excluded_path(self):
+        from otel_observability.fastapi import _AccessLogPathFilter
+
+        f = _AccessLogPathFilter("/ping")
+        rec = self._access_record('127.0.0.1:0 - "GET /ping HTTP/1.1" 200')
+        assert f.filter(rec) is False
+
+    def test_keeps_other_path(self):
+        from otel_observability.fastapi import _AccessLogPathFilter
+
+        f = _AccessLogPathFilter("/ping")
+        rec = self._access_record('127.0.0.1:0 - "GET /accounts HTTP/1.1" 200')
+        assert f.filter(rec) is True
+
+    def test_parses_pipe_and_comma_separators(self):
+        from otel_observability.fastapi import _AccessLogPathFilter
+
+        f = _AccessLogPathFilter("/health|/metrics, /ping")
+        for path in ("/health", "/metrics", "/ping"):
+            rec = self._access_record(f"GET {path} HTTP/1.1")
+            assert f.filter(rec) is False
 
 
 @pytest.mark.unit

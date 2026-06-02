@@ -45,6 +45,11 @@ app = FastAPI()
 # Instrumentar ANTES de definir rotas
 instrument_fastapi(app)
 
+# As URLs em excluded_urls saem do tracing E têm o access log do uvicorn
+# suprimido automaticamente (não precisa declarar filtro de health check no
+# serviço). Use suppress_access_logs=False para desativar essa supressão.
+#   instrument_fastapi(app, excluded_urls="/ping")
+
 logger = get_logger(__name__)
 
 @app.get("/users/{user_id}")
