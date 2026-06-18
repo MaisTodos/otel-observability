@@ -1,6 +1,10 @@
 version = 1
 revision = 3
 requires-python = ">=3.10"
+resolution-markers = [
+    "python_full_version >= '3.12'",
+    "python_full_version < '3.12'",
+]
 
 [[package]]
 name = "annotated-doc"
@@ -395,6 +399,40 @@ wheels = [
 ]
 
 [[package]]
+name = "django"
+version = "5.2.14"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.12'",
+]
+dependencies = [
+    { name = "asgiref", marker = "python_full_version < '3.12'" },
+    { name = "sqlparse", marker = "python_full_version < '3.12'" },
+    { name = "tzdata", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/95/95f7faa0950867afaa0bef2460c6263afd6a2c78cc9434046ed28160b015/django-5.2.14.tar.gz", hash = "sha256:58a63ba841662e5c686b57ba1fec52ddd68c0b93bd96ac3029d55728f00bf8a2", size = 10895118, upload-time = "2026-05-05T13:57:31.104Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/44/f172870cf87aa25afef48fb72adba89ee8b77fcab6f3b23d240b923f1528/django-5.2.14-py3-none-any.whl", hash = "sha256:6f712143bd3064310d1f50fac859c3e9a274bdcfc9595339853be7779297fc76", size = 8311320, upload-time = "2026-05-05T13:57:25.795Z" },
+]
+
+[[package]]
+name = "django"
+version = "6.0.5"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12'",
+]
+dependencies = [
+    { name = "asgiref", marker = "python_full_version >= '3.12'" },
+    { name = "sqlparse", marker = "python_full_version >= '3.12'" },
+    { name = "tzdata", marker = "python_full_version >= '3.12' and sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5e/f1/bf85f0d29ef76abf901f193fe8fef4769d3da7794197832bc30151c071d8/django-6.0.5.tar.gz", hash = "sha256:bc6d6872e98a2864c836e42edd644b362db311147dd5aa8d5b82ba7a032f5269", size = 10924131, upload-time = "2026-05-05T13:54:39.329Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/5b/1328f8b84fce040c404f76822bf8c57d254e368e8cbd8bd67ec2b26d75f5/django-6.0.5-py3-none-any.whl", hash = "sha256:9d58a7cb49244e74c8e161d5e403a46d6209f1009ba40f5a66d6aa0d0786a8f0", size = 8368680, upload-time = "2026-05-05T13:54:33.532Z" },
+]
+
+[[package]]
 name = "editor"
 version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -412,7 +450,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -697,6 +735,22 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-django"
+version = "0.61b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-instrumentation-wsgi" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/ef/6bc1a6560630f26b1c010af86b28f42bfbe6a601bd1647d1436e0d3436aa/opentelemetry_instrumentation_django-0.61b0.tar.gz", hash = "sha256:9885154dc128578de0e6b5ce49e965c786f8ab071175bec005dcd454510be951", size = 25996, upload-time = "2026-03-04T14:20:30.453Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/3b/74dad6d98fdee1d137f1c2748548d4159578508f21e3aef581c110e64041/opentelemetry_instrumentation_django-0.61b0-py3-none-any.whl", hash = "sha256:26c1b0b325a9783d4a2f4df660ba05cf929c3eda2ae9b07916b649bb44e1c5b6", size = 20773, upload-time = "2026-03-04T14:19:25.675Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation-fastapi"
 version = "0.61b0"
 source = { registry = "https://pypi.org/simple" }
@@ -803,6 +857,21 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-wsgi"
+version = "0.61b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/89/e5/189f2845362cfe78e356ba127eab21456309def411c6874aa4800c3de816/opentelemetry_instrumentation_wsgi-0.61b0.tar.gz", hash = "sha256:380f2ae61714e5303275a80b2e14c58571573cd1fddf496d8c39fb9551c5e532", size = 19898, upload-time = "2026-03-04T14:20:54.068Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/75/d6b42ba26f3c921be6d01b16561b7bb863f843bad7ac3a5011f62617bcab/opentelemetry_instrumentation_wsgi-0.61b0-py3-none-any.whl", hash = "sha256:bd33b0824166f24134a3400648805e8d2e6a7951f070241294e8b8866611d7fa", size = 14628, upload-time = "2026-03-04T14:20:03.934Z" },
+]
+
+[[package]]
 name = "opentelemetry-propagator-aws-xray"
 version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -877,9 +946,12 @@ dependencies = [
 all = [
     { name = "chalice" },
     { name = "datadog" },
+    { name = "django", version = "5.2.14", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "django", version = "6.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "fastapi" },
     { name = "opentelemetry-instrumentation-boto3sqs" },
     { name = "opentelemetry-instrumentation-botocore" },
+    { name = "opentelemetry-instrumentation-django" },
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-instrumentation-httpx" },
     { name = "opentelemetry-instrumentation-psycopg2" },
@@ -896,6 +968,11 @@ database = [
     { name = "opentelemetry-instrumentation-psycopg2" },
     { name = "opentelemetry-instrumentation-pymongo" },
     { name = "opentelemetry-instrumentation-sqlalchemy" },
+]
+django = [
+    { name = "django", version = "5.2.14", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "django", version = "6.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "opentelemetry-instrumentation-django" },
 ]
 fastapi = [
     { name = "fastapi" },
@@ -921,8 +998,11 @@ redis = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "django", version = "5.2.14", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "django", version = "6.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "opentelemetry-instrumentation-django" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -937,6 +1017,8 @@ requires-dist = [
     { name = "chalice", marker = "extra == 'chalice'", specifier = ">=1.0.0" },
     { name = "datadog", marker = "extra == 'all'", specifier = ">=0.45.0" },
     { name = "datadog", marker = "extra == 'metrics'", specifier = ">=0.45.0" },
+    { name = "django", marker = "extra == 'all'", specifier = ">=4.0" },
+    { name = "django", marker = "extra == 'django'", specifier = ">=4.0" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.100.0" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.100.0" },
     { name = "opentelemetry-api", specifier = ">=1.20.0" },
@@ -946,6 +1028,8 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-boto3sqs", marker = "extra == 'lambda'", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-botocore", marker = "extra == 'all'", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-botocore", marker = "extra == 'lambda'", specifier = ">=0.41b0" },
+    { name = "opentelemetry-instrumentation-django", marker = "extra == 'all'", specifier = ">=0.41b0" },
+    { name = "opentelemetry-instrumentation-django", marker = "extra == 'django'", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'all'", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'fastapi'", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'all'", specifier = ">=0.41b0" },
@@ -966,12 +1050,14 @@ requires-dist = [
     { name = "opentelemetry-propagator-aws-xray", marker = "extra == 'lambda'", specifier = ">=1.0.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.20.0" },
 ]
-provides-extras = ["fastapi", "lambda", "database", "redis", "http", "chalice", "metrics", "all"]
+provides-extras = ["fastapi", "lambda", "database", "redis", "http", "chalice", "django", "metrics", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "django", specifier = ">=4.0,<7.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.23,<0.28" },
+    { name = "opentelemetry-instrumentation-django", specifier = ">=0.41b0" },
     { name = "pre-commit", specifier = ">=3.0.0" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
@@ -1425,6 +1511,15 @@ wheels = [
 ]
 
 [[package]]
+name = "sqlparse"
+version = "0.5.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/76/437d71068094df0726366574cf3432a4ed754217b436eb7429415cf2d480/sqlparse-0.5.5.tar.gz", hash = "sha256:e20d4a9b0b8585fdf63b10d30066c7c94c5d7a7ec47c889a2d83a3caa93ff28e", size = 120815, upload-time = "2025-12-19T07:17:45.073Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/4b/359f28a903c13438ef59ebeee215fb25da53066db67b305c125f1c6d2a25/sqlparse-0.5.5-py3-none-any.whl", hash = "sha256:12a08b3bf3eec877c519589833aed092e2444e68240a3577e8e26148acc7b1ba", size = 46138, upload-time = "2025-12-19T07:17:46.573Z" },
+]
+
+[[package]]
 name = "starlette"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1510,6 +1605,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/19/1b9b0e29f30c6d35cb345486df41110984ea67ae69dddbc0e8a100999493/tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10", size = 198254, upload-time = "2026-04-24T15:22:08.651Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl", hash = "sha256:bbe9af844f658da81a5f95019480da3a89415801f6cc966806612cc7169bffe7", size = 349321, upload-time = "2026-04-24T15:22:05.876Z" },
 ]
 
 [[package]]
