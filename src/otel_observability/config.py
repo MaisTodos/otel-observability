@@ -5,6 +5,26 @@ import os
 from typing import Any
 import warnings
 
+_OTLP_SIGNAL_PATHS = {"traces": "/v1/traces", "metrics": "/v1/metrics", "logs": "/v1/logs"}
+
+
+def _resolve_signal_endpoint(specific: str | None, generic: str | None, signal: str) -> str | None:
+    """Resolve o endpoint de um sinal.
+
+    Endpoint declarado por sinal vai verbatim: quem escreveu ja disse o alvo
+    final, e completar o path quebraria quem usa proxy com rota propria.
+
+    Endpoint generico e uma BASE, e ganha o path do sinal. Sem isso, os
+    exporters recebem endpoint explicito sem path e o SDK nao completa —
+    traces e logs POSTam os dois na raiz. Verificado em 06/09/2026, e o
+    que quebra a configuracao de sidecar em EKS/ECS.
+    """
+    if specific and specific.strip():
+        return specific.strip()
+    if generic and generic.strip():
+        return generic.strip().rstrip("/") + _OTLP_SIGNAL_PATHS[signal]
+    return None
+
 
 @dataclass
 class TelemetryConfig:
@@ -67,15 +87,15 @@ class TelemetryConfig:
         # Signal-specific endpoint resolution: signal-specific > generic > None
         generic_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 
-        otlp_traces_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or generic_endpoint or ""
-        ).strip() or None
-        otlp_metrics_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or generic_endpoint or ""
-        ).strip() or None
-        otlp_logs_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or generic_endpoint or ""
-        ).strip() or None
+        otlp_traces_endpoint = _resolve_signal_endpoint(
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), generic_endpoint, "traces"
+        )
+        otlp_metrics_endpoint = _resolve_signal_endpoint(
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), generic_endpoint, "metrics"
+        )
+        otlp_logs_endpoint = _resolve_signal_endpoint(
+            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"), generic_endpoint, "logs"
+        )
 
         traces_enabled = (
             os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true"

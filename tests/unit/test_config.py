@@ -149,7 +149,7 @@ class TestTelemetryConfig:
             clear=True,
         ):
             config = TelemetryConfig.from_env()
-            assert config.otlp_traces_endpoint == "http://generic:4318"
+            assert config.otlp_traces_endpoint == "http://generic:4318/v1/traces"
             assert config.traces_enabled is True
 
     def test_traces_endpoint_signal_specific_overrides_generic(self):
@@ -195,7 +195,7 @@ class TestTelemetryConfig:
             clear=True,
         ):
             config = TelemetryConfig.from_env()
-            assert config.otlp_logs_endpoint == "http://generic:4318"
+            assert config.otlp_logs_endpoint == "http://generic:4318/v1/logs"
 
     def test_logs_endpoint_signal_specific(self):
         """Endpoint específico de logs é respeitado."""
@@ -224,6 +224,52 @@ class TestTelemetryConfig:
         with patch.dict(os.environ, {}, clear=True):  # noqa: SIM117
             with pytest.warns(UserWarning, match="No OTLP traces endpoint configured"):
                 TelemetryConfig.from_env()
+
+    def test_endpoint_generico_completa_o_path_por_sinal(self):
+        """Sidecar: OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 precisa virar
+        /v1/traces e /v1/logs, senao os dois sinais POSTam na raiz e no mesmo URL."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318"},
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+
+            assert config.otlp_traces_endpoint == "http://localhost:4318/v1/traces"
+            assert config.otlp_logs_endpoint == "http://localhost:4318/v1/logs"
+            assert config.otlp_metrics_endpoint == "http://localhost:4318/v1/metrics"
+
+    def test_endpoint_generico_com_barra_final_nao_duplica(self):
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318/"},
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+
+            assert config.otlp_traces_endpoint == "http://localhost:4318/v1/traces"
+
+    def test_endpoint_por_sinal_fica_verbatim(self):
+        """Quem declarou o endpoint do sinal ja disse o alvo final — nao mexer."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "https://otlp.datadoghq.com/v1/logs"},
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+
+            assert config.otlp_logs_endpoint == "https://otlp.datadoghq.com/v1/logs"
+
+    def test_endpoint_por_sinal_com_rota_propria_nao_ganha_path(self):
+        """Proxy/gateway com rota propria: completar path aqui quebraria."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://gateway:8080/telemetria"},
+            clear=True,
+        ):
+            config = TelemetryConfig.from_env()
+
+            assert config.otlp_traces_endpoint == "http://gateway:8080/telemetria"
 
 
 @pytest.mark.unit

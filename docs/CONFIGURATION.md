@@ -78,7 +78,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 
 ### 3. Container com Datadog Agent (ECS Fargate, Docker Compose)
 
-O Agent roda como sidecar e recebe OTLP na porta 4318.
+O Agent roda como sidecar e recebe OTLP na porta 4318. A env genérica é base: a lib completa o path por sinal (`/v1/traces`, `/v1/logs`); endpoint declarado por sinal vai verbatim.
 
 ```bash
 OTEL_SERVICE_NAME=my-service

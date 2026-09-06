@@ -108,7 +108,7 @@ Aplicação → OTLP Exporter → Datadog Intake → Datadog Cloud
 ### Traces (Spans)
 - **O que é:** Árvore de operações (requisições, queries, chamadas HTTP)
 - **Formato:** OTLP (OpenTelemetry Protocol)
-- **Endpoint:** `http://localhost:4318/v1/traces` (adicionado automaticamente)
+- **Endpoint:** `http://localhost:4318/v1/traces` — o path `/v1/traces` é acrescentado pela lib quando o valor vem da env genérica `OTEL_EXPORTER_OTLP_ENDPOINT` (que é base); endpoint declarado por sinal vai verbatim
 
 ### Logs
 - **O que é:** Eventos textuais com timestamp

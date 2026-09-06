@@ -25,7 +25,7 @@ Datadog gera automaticamente um **mapa de serviços** mostrando:
 1. **Verificar endpoint OTLP:**
    ```bash
    echo $OTEL_EXPORTER_OTLP_ENDPOINT
-   # Deve ser http://localhost:4318 (SEM /v1/traces)
+   # Deve ser http://localhost:4318 (SEM path — a lib acrescenta /v1/traces; com path na env genérica duplicaria)
    ```
 
 2. **Verificar Datadog Agent/Extension:**

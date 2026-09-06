@@ -154,6 +154,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "--cov=otel_observability",
     "--cov-fail-under=80",
 ]
 markers = [
