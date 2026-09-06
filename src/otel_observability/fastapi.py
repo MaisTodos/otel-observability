@@ -58,7 +58,7 @@ def instrument_fastapi(
     app,
     config: TelemetryConfig | None = None,
     configure_logs: bool = True,
-    json_logs: bool = False,
+    json_logs: bool | None = None,
     excluded_urls: str | None = None,
     auto_instrument_libs: bool = True,
     redact_keys: Iterable[str] | None = None,
@@ -77,7 +77,9 @@ def instrument_fastapi(
         app: Instância do FastAPI.
         config: Configuração customizada. Se None, carrega de variáveis de ambiente.
         configure_logs: Se True, configura logging com correlação de traces.
-        json_logs: Se True, usa formato JSON para logs (recomendado em produção).
+        json_logs: Formato JSON dos logs, resolvido por precedência: parâmetro
+            explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
+            do entrypoint (False aqui).
         excluded_urls: Regex de URLs para excluir do tracing (ex: "/health,/metrics").
 
     Raises:
@@ -123,7 +125,8 @@ def instrument_fastapi(
     # If configure_logging runs after, its handlers.clear() removes that handler
     # and logs never reach Datadog.
     if configure_logs:
-        configure_logging(level=cfg.log_level, json_format=json_logs, redact_keys=redact_keys)
+        json_format = cfg.resolve_json_logs(json_logs, default=False)
+        configure_logging(level=cfg.log_level, json_format=json_format, redact_keys=redact_keys)
 
     init_telemetry(cfg)
 

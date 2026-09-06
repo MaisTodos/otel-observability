@@ -167,6 +167,24 @@ class TestInstrumentFastapi:
             access_logger.filters = before
 
 
+def test_instrument_fastapi_respeita_otel_log_format(monkeypatch, mocker, reset_telemetry):
+    """OTEL_LOG_FORMAT=json liga log JSON no FastAPI sem parâmetro explícito."""
+    import otel_observability.tracer as tracer_module
+
+    # init_telemetry tem guarda de idempotência sobre globais de módulo — resetar
+    # antes para a instrumentação não virar no-op; a fixture reset_telemetry limpa depois.
+    tracer_module._tracer_provider = None
+    tracer_module._config = None
+
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv("OTEL_LOG_FORMAT", "json")
+    spy = mocker.patch("otel_observability.fastapi.configure_logging")
+
+    instrument_fastapi(FastAPI())
+
+    assert spy.call_args.kwargs["json_format"] is True
+
+
 @pytest.mark.unit
 class TestAccessLogPathFilter:
     """Testes para o filtro de supressão de access log por path."""

@@ -31,7 +31,7 @@ def instrument_chalice(
     app: Chalice,
     config: TelemetryConfig | None = None,
     configure_logs: bool = True,
-    json_logs: bool = True,
+    json_logs: bool | None = None,
     auto_instrument_libs: bool = True,
 ):
     """
@@ -49,7 +49,9 @@ def instrument_chalice(
         app: Instância do Chalice.
         config: Configuração customizada. Se None, carrega de variáveis de ambiente.
         configure_logs: Se True, configura logging com correlação de traces.
-        json_logs: Se True, usa formato JSON para logs (recomendado em produção).
+        json_logs: Formato JSON dos logs, resolvido por precedência: parâmetro
+            explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
+            do entrypoint (True aqui).
         auto_instrument_libs: Se True, auto-instrumenta bibliotecas comuns (httpx, requests, boto3, etc.)
 
     Raises:
@@ -90,7 +92,10 @@ def instrument_chalice(
     init_telemetry(cfg)
 
     if configure_logs:
-        configure_logging(level=cfg.log_level, json_format=json_logs)
+        configure_logging(
+            level=cfg.log_level,
+            json_format=cfg.resolve_json_logs(json_logs, default=True),
+        )
 
     if auto_instrument_libs:
         auto_instrument()

@@ -23,7 +23,7 @@ _instrumented = False
 def instrument_lambda_handler(
     config: TelemetryConfig | None = None,
     configure_logs: bool = True,
-    json_logs: bool = True,
+    json_logs: bool | None = None,
     auto_extract_context: bool = True,
     auto_instrument_libs: bool = True,
 ):
@@ -37,7 +37,9 @@ def instrument_lambda_handler(
     Args:
         config: Configuração customizada. Se None, carrega de variáveis de ambiente.
         configure_logs: Se True, configura logging com correlação de traces.
-        json_logs: Se True, usa formato JSON para logs.
+        json_logs: Formato JSON dos logs, resolvido por precedência: parâmetro
+            explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
+            do entrypoint (True aqui).
         auto_extract_context: Se True, extrai automaticamente trace context de eventos
                              SQS/SNS/EventBridge/API Gateway para tracing distribuído.
         auto_instrument_libs: Se True, auto-instrumenta bibliotecas comuns (boto3, httpx, etc.)
@@ -66,7 +68,10 @@ def instrument_lambda_handler(
             init_telemetry(cfg)
 
             if configure_logs:
-                configure_logging(level=cfg.log_level, json_format=json_logs)
+                configure_logging(
+                    level=cfg.log_level,
+                    json_format=cfg.resolve_json_logs(json_logs, default=True),
+                )
 
             if auto_instrument_libs:
                 auto_instrument()

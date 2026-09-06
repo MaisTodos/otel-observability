@@ -22,6 +22,7 @@ class TelemetryConfig:
     is_lambda: bool
     enable_console_export: bool
     log_level: str
+    log_format: str | None
     sample_rate: float
     dogstatsd_enabled: bool
     dogstatsd_host: str
@@ -46,6 +47,8 @@ class TelemetryConfig:
             DD_SITE: Datadog site (datadoghq.com, datadoghq.eu, etc.)
             OTEL_CONSOLE_EXPORT: Enable console exporter for debugging
             OTEL_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR)
+            OTEL_LOG_FORMAT: Log format. "json" (case-insensitive) enables JSON logs;
+                empty or other values fall back to the entrypoint default.
             OTEL_TRACES_SAMPLER_ARG: Sample rate (0.0 to 1.0, default 1.0)
             DD_DOGSTATSD_ENABLED: Enable DogStatsD metrics (default: true)
             DD_DOGSTATSD_HOST: DogStatsD host (default: localhost)
@@ -104,11 +107,20 @@ class TelemetryConfig:
             is_lambda=is_lambda,
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
             log_level=os.getenv("OTEL_LOG_LEVEL", "INFO").upper(),
+            log_format=(os.getenv("OTEL_LOG_FORMAT") or None),
             sample_rate=float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")),
             dogstatsd_enabled=dogstatsd_enabled,
             dogstatsd_host=dogstatsd_host,
             dogstatsd_port=dogstatsd_port,
         )
+
+    def resolve_json_logs(self, explicit: bool | None, default: bool) -> bool:
+        """Resolve o formato de log: parâmetro explícito > OTEL_LOG_FORMAT > default."""
+        if explicit is not None:
+            return explicit
+        if self.log_format:
+            return self.log_format.strip().lower() == "json"
+        return default
 
     @staticmethod
     def _parse_headers() -> dict | None:

@@ -202,6 +202,31 @@ class TestTelemetryConfig:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("env", "explicit", "default", "esperado"),
+    [
+        (None, None, False, False),  # FastAPI sem env: comportamento de hoje
+        (None, None, True, True),  # Lambda sem env: comportamento de hoje
+        ("json", None, False, True),  # env liga JSON no FastAPI — o bug corrigido
+        ("text", None, True, False),  # env desliga JSON no Lambda
+        ("", None, True, True),  # env vazia é ignorada
+        ("JSON", None, False, True),  # case-insensitive
+        ("text", True, False, True),  # parâmetro explícito vence a env
+    ],
+)
+def test_resolve_json_logs(monkeypatch, env, explicit, default, esperado):
+    if env is None:
+        monkeypatch.delenv("OTEL_LOG_FORMAT", raising=False)
+    else:
+        monkeypatch.setenv("OTEL_LOG_FORMAT", env)
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+
+    cfg = TelemetryConfig.from_env()
+
+    assert cfg.resolve_json_logs(explicit, default=default) is esperado
+
+
+@pytest.mark.unit
 class TestSeedOtelEnv:
     """Testes para seed_otel_env."""
 
