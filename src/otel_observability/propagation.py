@@ -38,6 +38,9 @@ def inject_context_into_sqs_message_attributes() -> dict[str, dict[str, str]]:
     """
     Injeta trace context em SQS messageAttributes.
 
+    Nota: consome até 3 dos 10 MessageAttributes disponíveis na mensagem SQS
+    (traceparent, tracestate, baggage).
+
     Returns:
         Dict no formato SQS MessageAttributes.
 
@@ -53,25 +56,12 @@ def inject_context_into_sqs_message_attributes() -> dict[str, dict[str, str]]:
         ...     MessageAttributes=inject_context_into_sqs_message_attributes()
         ... )
     """
-    carrier = {}
+    carrier: dict[str, str] = {}
     inject(carrier)
 
-    # Converter para formato SQS
-    message_attributes = {}
-
-    if "traceparent" in carrier:
-        message_attributes["traceparent"] = {
-            "StringValue": carrier["traceparent"],
-            "DataType": "String",
-        }
-
-    if carrier.get("tracestate"):
-        message_attributes["tracestate"] = {
-            "StringValue": carrier["tracestate"],
-            "DataType": "String",
-        }
-
-    return message_attributes
+    return {
+        key: {"StringValue": value, "DataType": "String"} for key, value in carrier.items() if value
+    }
 
 
 def inject_context_into_sns_message_attributes() -> dict[str, dict[str, str]]:
@@ -237,14 +227,10 @@ def extract_context_from_sqs_message(message: dict[str, Any]):
     """
     carrier = {}
 
-    if "messageAttributes" in message:
-        attrs = message["messageAttributes"]
-
-        if "traceparent" in attrs:
-            carrier["traceparent"] = attrs["traceparent"].get("stringValue", "")
-
-        if "tracestate" in attrs:
-            carrier["tracestate"] = attrs["tracestate"].get("stringValue", "")
+    for key, attr in (message.get("messageAttributes") or {}).items():
+        value = attr.get("stringValue") if isinstance(attr, dict) else None
+        if value:
+            carrier[key] = value
 
     return extract(carrier) if carrier else context.get_current()
 
@@ -274,14 +260,11 @@ def extract_context_from_sns_message(record: dict[str, Any]):
     """
     carrier = {}
 
-    if "Sns" in record and "MessageAttributes" in record["Sns"]:
-        attrs = record["Sns"]["MessageAttributes"]
-
-        if "traceparent" in attrs:
-            carrier["traceparent"] = attrs["traceparent"].get("Value", "")
-
-        if "tracestate" in attrs:
-            carrier["tracestate"] = attrs["tracestate"].get("Value", "")
+    sns_attrs = (record.get("Sns") or {}).get("MessageAttributes") or {}
+    for key, attr in sns_attrs.items():
+        value = attr.get("Value") if isinstance(attr, dict) else None
+        if value:
+            carrier[key] = value
 
     return extract(carrier) if carrier else context.get_current()
 
