@@ -182,6 +182,26 @@ class TestJSONFormatter:
             assert "exception" in log_data
             assert "ValueError" in log_data["exception"]
 
+    def test_json_formatter_nao_emite_task_name(self):
+        """Testa que o JSONFormatter não emite o campo taskName do LogRecord."""
+        formatter = JSONFormatter()
+        record = logging.LogRecord(
+            name="teste",
+            level=logging.INFO,
+            pathname="/tmp/x.py",
+            lineno=1,
+            msg="mensagem",
+            args=(),
+            exc_info=None,
+        )
+        record.taskName = None  # presente nativamente a partir do Python 3.12
+        record.account_id = "123"  # campo extra de negócio: TEM que sobreviver
+
+        payload = json.loads(formatter.format(record))
+
+        assert "taskName" not in payload
+        assert payload["account_id"] == "123"
+
 
 @pytest.mark.unit
 class TestConfigureLogging:
