@@ -1,5 +1,55 @@
 # Changelog
 
+## [CNT-3620] — Flush em Lambda/Chalice, teto de export, propagação e `OTEL_LOG_FORMAT` funcionando
+
+### Contexto
+
+Esta PR acumulou 13 commits desde a entrada abaixo. O arco de PII/logging tem entrada própria (`CNT-3524`, com `mask_document` público e `RedactionFilter` por `mask_policy`) e não se repete aqui. O restante — telemetria que se perdia sem erro e sem log, e configuração que existia mas não funcionava — está consolidado abaixo, agrupado pelo que muda para quem consome.
+
+### BREAKING
+
+- `OTEL_LOG_FORMAT` passa a funcionar de verdade. Era código morto: a env era copiada e nunca lida, e o único caminho pro JSON era o parâmetro explícito. Precedência agora: parâmetro > `OTEL_LOG_FORMAT` > default do entrypoint (`False` no FastAPI, `True` em Lambda/Chalice). Serviço que já tinha a env setada **muda de comportamento** no upgrade — passa a emitir JSON de verdade.
+- Métricas param de sair com a tag duplicada (tag unificada removida das 4 funções públicas). Séries antigas no Datadog não são reescritas: dashboards que agrupam por `env`/`service`/`version` mostram descontinuidade no dia do deploy. É esperado, não é regressão.
+
+### Mudanças
+
+#### `config.py`
+
+- `TelemetryConfig` ganha `log_format` e `export_timeout`, ambos com default e no fim do dataclass — quem constrói config própria não quebra; quem construía posicionalmente com os 16 campos originais deve conferir.
+- `OTEL_EXPORTER_OTLP_TIMEOUT` (default 3s, nome da spec OTel) passa a limitar o export. Antes o timeout efetivo era 10s por sinal, com retry interno — 20s por invocação Lambda com o coletor fora.
+
+#### `tracer.py`
+
+- Sampler envolto em `ParentBased`: decisão de amostragem propagada pelo chamador é respeitada. Serviço com `sample_rate` baixo passa a gravar spans que antes descartava.
+- `get_tracer()` sem argumento resolve o `__name__` do módulo chamador.
+- `telemetry.sdk.version` passa a reportar a versão real do `pyproject.toml` (`__version__` via `importlib.metadata`), não mais o valor hardcoded desde o primeiro commit.
+
+#### `propagation.py`
+
+- `baggage` sobrevive ao round-trip via SQS/SNS.
+- `extract` compõe sobre o contexto atual em vez de substituir: carrier não-vazio sem `traceparent` (produtor não-instrumentado) preserva o span pai e o baggage.
+
+#### `aws_lambda.py` / `chalice.py`
+
+- `redact_keys` exposto nos dois `instrument_*` (o FastAPI já repassava desde o CNT-2832; Lambda/Chalice herdavam só as chaves de credencial).
+- Ordem de init corrigida: `configure_logging` roda antes de `init_telemetry` — antes o `handlers.clear()` removia o handler OTLP recém-instalado e, com `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` setado, nenhum log saía via OTLP.
+- `flush_telemetry` ao fim de cada invocação (handler no Lambda; middleware HTTP e handler SQS no Chalice) em vez de `shutdown_telemetry` — em container warm, o shutdown matava o `BatchSpanProcessor` e toda telemetria da 2ª invocação em diante se perdia.
+
+#### `logging.py`
+
+- `JSONFormatter` reutiliza `_STANDARD_LOGRECORD_ATTRS` — elimina a segunda lista de atributos, que não continha `taskName` (campo do Python 3.12+) e o fazia vazar como extra em todo log.
+
+#### `fastapi.py`
+
+- Access log filtra por path (`parse_excluded_urls`), não por substring da linha inteira. Serviço que dependia, sem saber, da supressão excedente vai ver mais access log.
+
+#### CI
+
+- Lint usa `uv` em vez de `pip` solto, pra casar com o lock.
+- `validate-release-pr.yml` exige que o título da PR bata com a versão do `pyproject.toml`. A partir daqui, release PR precisa bumpar o pyproject antes de abrir; mudança local de versão exige `uv sync` (a metadata instalada fica congelada).
+
+---
+
 ## [CNT-3524] — `mask_policy`: mapa campo → estratégia, configurável pelo consumidor
 
 ### Contexto

@@ -20,7 +20,7 @@ except ImportError:
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import configure_logging
-from .tracer import get_tracer, init_telemetry
+from .tracer import flush_telemetry, get_tracer, init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +165,7 @@ def instrument_chalice(
                     raise
         finally:
             otel_context.detach(token)
+            flush_telemetry(timeout=5)
 
     _instrumented = True
     logger.info(
@@ -250,6 +251,7 @@ def trace_sqs_message(func: Callable) -> Callable:
                     raise
         finally:
             otel_context.detach(token)
+            flush_telemetry(timeout=5)
 
     return wrapper
 
