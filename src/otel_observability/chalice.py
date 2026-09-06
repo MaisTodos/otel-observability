@@ -1,6 +1,6 @@
 """Chalice integration with automatic instrumentation and distributed tracing."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import wraps
 import logging
 from typing import Any
@@ -33,6 +33,7 @@ def instrument_chalice(
     configure_logs: bool = True,
     json_logs: bool | None = None,
     auto_instrument_libs: bool = True,
+    redact_keys: Iterable[str] | None = None,
 ):
     """
     Instrumenta aplicação Chalice com OpenTelemetry.
@@ -53,6 +54,8 @@ def instrument_chalice(
             explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
             do entrypoint (True aqui).
         auto_instrument_libs: Se True, auto-instrumenta bibliotecas comuns (httpx, requests, boto3, etc.)
+        redact_keys: Chaves extras cujos valores são mascarados nos logs, além
+            das chaves padrão de credencial.
 
     Raises:
         ImportError: Se chalice não estiver instalado.
@@ -89,13 +92,19 @@ def instrument_chalice(
 
     cfg = config or TelemetryConfig.from_env()
 
-    init_telemetry(cfg)
-
+    # configure_logging must run BEFORE init_telemetry: init_telemetry calls
+    # init_otlp_log_export which adds the LoggingHandler to the root logger.
+    # If configure_logging runs after, its handlers.clear() removes that handler
+    # and logs never reach Datadog.
     if configure_logs:
         configure_logging(
             level=cfg.log_level,
             json_format=cfg.resolve_json_logs(json_logs, default=True),
+            redact_keys=redact_keys,
         )
+
+    # Inicializar telemetria
+    init_telemetry(cfg)
 
     if auto_instrument_libs:
         auto_instrument()

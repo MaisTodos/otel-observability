@@ -128,6 +128,21 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         logger.info("Telemetry shutdown complete")
 
 
+def flush_telemetry(timeout: int = 5) -> None:
+    """Forca o envio do que esta em buffer, SEM desligar o provider.
+
+    Lambda reaproveita container: chamar shutdown a cada invocacao deixa o
+    BatchSpanProcessor morto da 2a em diante. Flush esvazia o buffer e mantem
+    o provider utilizavel.
+    """
+    from .logging import flush_log_export
+
+    flush_log_export(timeout=timeout)
+
+    if _tracer_provider:
+        _tracer_provider.force_flush(timeout_millis=timeout * 1000)
+
+
 def get_tracer(name: str | None = None) -> trace_api.Tracer:
     """
     Get a tracer instance.

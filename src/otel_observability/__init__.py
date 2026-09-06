@@ -78,6 +78,7 @@ from .logging import (
     set_log_context,
 )
 from .tracer import (
+    flush_telemetry,
     get_current_span,
     get_current_span_id,
     get_current_trace_id,
@@ -131,6 +132,7 @@ __all__ = [
     "TelemetryConfig",
     "clear_log_context",
     "configure_logging",
+    "flush_telemetry",
     "get_current_span",
     "get_current_span_id",
     "get_current_trace_id",

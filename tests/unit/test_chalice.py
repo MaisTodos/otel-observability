@@ -277,6 +277,34 @@ class TestInstrumentChalice:
 
             mock_span.set_attribute.assert_any_call("request.is_health_check", True)
 
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_redact_keys_chega_no_configure_logging(self, mocker, reset_telemetry):
+        """redact_keys chega ao configure_logging."""
+        spy = mocker.patch("otel_observability.chalice.configure_logging")
+        mock_app = MagicMock()
+        mock_app.app_name = "test-app"
+        mock_app.middleware = MagicMock()
+
+        instrument_chalice(mock_app, redact_keys=["cpf_do_cliente"], auto_instrument_libs=False)
+
+        assert spy.call_args.kwargs["redact_keys"] == ["cpf_do_cliente"]
+
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_configure_logging_roda_antes_de_init_telemetry(self, mocker):
+        """Ordem importa: init_telemetry instala o handler OTLP e configure_logging
+        faz handlers.clear(). Invertido, o log nunca sai via OTLP."""
+        manager = mocker.MagicMock()
+        manager.attach_mock(mocker.patch("otel_observability.chalice.configure_logging"), "cfg_log")
+        manager.attach_mock(mocker.patch("otel_observability.chalice.init_telemetry"), "init")
+        mock_app = MagicMock()
+        mock_app.app_name = "test-app"
+        mock_app.middleware = MagicMock()
+
+        instrument_chalice(mock_app, auto_instrument_libs=False)
+
+        nomes = [c[0] for c in manager.mock_calls]
+        assert nomes.index("cfg_log") < nomes.index("init")
+
 
 @pytest.mark.unit
 class TestTraceSqsMessage:

@@ -419,6 +419,24 @@ def shutdown_log_export(timeout: int = 30) -> None:
             _module_logger.warning(f"Error during log export shutdown: {e}")
 
 
+def flush_log_export(timeout: int = 30) -> None:
+    """
+    Flush the OTLP log exporter WITHOUT shutting it down.
+
+    Called automatically by flush_telemetry().
+
+    Args:
+        timeout: Maximum time to wait for flush (seconds).
+    """
+    global _logger_provider
+
+    if _logger_provider:
+        try:
+            _logger_provider.force_flush(timeout_millis=timeout * 1000)
+        except Exception as e:
+            _module_logger.warning(f"Error during log export flush: {e}")
+
+
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger instance with trace correlation enabled.
