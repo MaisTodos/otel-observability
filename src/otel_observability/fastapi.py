@@ -2,11 +2,11 @@
 
 from collections.abc import Iterable
 import logging
-import re
 import time
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.util.http import parse_excluded_urls
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
 
@@ -16,6 +16,7 @@ except ImportError:
     FastAPIInstrumentor = None
     BaseHTTPMiddleware = object
     Request = None
+    parse_excluded_urls = None
 
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
@@ -26,20 +27,31 @@ logger = logging.getLogger(__name__)
 
 
 class _AccessLogPathFilter(logging.Filter):
-    """Descarta logs do uvicorn.access cujas URLs estão em excluded_urls.
+    """Descarta logs do uvicorn.access cujos paths estão em excluded_urls.
 
-    Evita que cada serviço precise declarar o próprio filtro de health check.
-    Instalado automaticamente pelo instrument_fastapi a partir do excluded_urls.
+    Usa o mesmo parser do FastAPIInstrumentor (parse_excluded_urls), então o
+    access log e o tracing concordam sobre o que é rota excluída. Casa contra o
+    path da requisição (record.args[2] do uvicorn.access), nunca contra a linha
+    formatada — user-agent e query string não influenciam a decisão.
     """
+
+    _PATH_ARG_INDEX = 2
 
     def __init__(self, excluded_urls: str) -> None:
         super().__init__()
-        # excluded_urls pode vir separado por vírgula ou pipe ("/ping", "/health|/metrics").
-        self._paths = [path.strip() for path in re.split(r"[,|]", excluded_urls) if path.strip()]
+        self._exclude_list = parse_excluded_urls(excluded_urls)
 
     def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        return not any(path in message for path in self._paths)
+        args = record.args
+        if not isinstance(args, tuple) or len(args) <= self._PATH_ARG_INDEX:
+            # Formato inesperado: deixa passar. Filtro de log falha aberto.
+            return True
+
+        path = args[self._PATH_ARG_INDEX]
+        if not isinstance(path, str):
+            return True
+
+        return not self._exclude_list.url_disabled(path)
 
 
 def instrument_fastapi(

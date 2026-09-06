@@ -171,31 +171,72 @@ class TestInstrumentFastapi:
 class TestAccessLogPathFilter:
     """Testes para o filtro de supressão de access log por path."""
 
-    @staticmethod
-    def _access_record(message: str) -> logging.LogRecord:
-        return logging.LogRecord("uvicorn.access", logging.INFO, "p", 1, message, None, None)
-
     def test_drops_excluded_path(self):
         from otel_observability.fastapi import _AccessLogPathFilter
 
         f = _AccessLogPathFilter("/ping")
-        rec = self._access_record('127.0.0.1:0 - "GET /ping HTTP/1.1" 200')
+        rec = _access_record("/ping")
         assert f.filter(rec) is False
 
     def test_keeps_other_path(self):
         from otel_observability.fastapi import _AccessLogPathFilter
 
         f = _AccessLogPathFilter("/ping")
-        rec = self._access_record('127.0.0.1:0 - "GET /accounts HTTP/1.1" 200')
+        rec = _access_record("/accounts")
         assert f.filter(rec) is True
 
     def test_parses_pipe_and_comma_separators(self):
+        """Vírgula separa; pipe vira alternância de regex (semântica do OTel)."""
         from otel_observability.fastapi import _AccessLogPathFilter
 
         f = _AccessLogPathFilter("/health|/metrics, /ping")
         for path in ("/health", "/metrics", "/ping"):
-            rec = self._access_record(f"GET {path} HTTP/1.1")
+            rec = _access_record(path)
             assert f.filter(rec) is False
+
+
+def _access_record(path: str) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:0", "GET", path, "1.1", 200),
+        exc_info=None,
+    )
+
+
+def test_filtro_suprime_path_excluido():
+    from otel_observability.fastapi import _AccessLogPathFilter
+
+    f = _AccessLogPathFilter("/ping")
+    assert f.filter(_access_record("/ping")) is False
+
+
+def test_filtro_nao_suprime_path_de_negocio():
+    from otel_observability.fastapi import _AccessLogPathFilter
+
+    f = _AccessLogPathFilter("/ping")
+    assert f.filter(_access_record("/api/v1/accounts")) is True
+
+
+def test_filtro_ignora_ocorrencia_fora_do_path():
+    """Antes: a substring '/ping' no user-agent derrubava o log. Agora não."""
+    from otel_observability.fastapi import _AccessLogPathFilter
+
+    f = _AccessLogPathFilter("/ping")
+    record = _access_record("/api/v1/accounts")
+    record.args = ("bot/ping-checker", "GET", "/api/v1/accounts", "1.1", 200)
+    assert f.filter(record) is True
+
+
+def test_filtro_deixa_passar_record_sem_args_esperados():
+    from otel_observability.fastapi import _AccessLogPathFilter
+
+    f = _AccessLogPathFilter("/ping")
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, "texto solto", (), None)
+    assert f.filter(record) is True
 
 
 @pytest.mark.unit
