@@ -62,6 +62,7 @@ def instrument_fastapi(
     excluded_urls: str | None = None,
     auto_instrument_libs: bool = True,
     redact_keys: Iterable[str] | None = None,
+    mask_policy: dict | None = None,
     suppress_access_logs: bool = True,
 ):
     """
@@ -81,6 +82,13 @@ def instrument_fastapi(
             explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
             do entrypoint (False aqui).
         excluded_urls: Regex de URLs para excluir do tracing (ex: "/health,/metrics").
+        mask_policy: Mapa campo -> Mask estendendo DEFAULT_MASK_POLICY (o default
+            universal sempre entra; o que passar aqui faz merge por cima e pode
+            sobrescrever um default). Exemplo:
+            >>> from otel_observability import CONTA_DIGITAL_MASK_POLICY, Mask
+            >>> instrument_fastapi(
+            ...     app, mask_policy={**CONTA_DIGITAL_MASK_POLICY, "xpto": Mask.LAST4}
+            ... )
 
     Raises:
         ImportError: Se opentelemetry-instrumentation-fastapi não estiver instalado.
@@ -126,7 +134,12 @@ def instrument_fastapi(
     # and logs never reach Datadog.
     if configure_logs:
         json_format = cfg.resolve_json_logs(json_logs, default=False)
-        configure_logging(level=cfg.log_level, json_format=json_format, redact_keys=redact_keys)
+        configure_logging(
+            level=cfg.log_level,
+            json_format=json_format,
+            redact_keys=redact_keys,
+            mask_policy=mask_policy,
+        )
 
     init_telemetry(cfg)
 

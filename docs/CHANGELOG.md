@@ -1,30 +1,40 @@
 # Changelog
 
-## [CNT-3524] — Chaves de PII no RedactionFilter, máscara parcial e `mask_document` público
+## [CNT-3524] — `mask_policy`: mapa campo → estratégia, configurável pelo consumidor
 
 ### Contexto
 
-O ticket CNT-3524 reportava que a recursão do `RedactionFilter` não alcançava chaves aninhadas dentro de `props`. O diagnóstico está incorreto: a recursão sobre `dict`/`list`/`tuple` já funcionava. O caso real (`account_document` em claro dentro de `props.header`) ocorria porque chaves de dado pessoal nunca fizeram parte de `DEFAULT_SENSITIVE_KEYS` — a lista só tinha credencial. O que mascarava o documento no topo era a função `_mask_document` duplicada em cada serviço, que não roda sobre valores aninhados.
+O ticket CNT-3524 reportava que a recursão do `RedactionFilter` não alcançava chaves aninhadas dentro de `props`. O diagnóstico está incorreto: a recursão já funcionava — o caso real (`account_document` em claro dentro de `props.header`) era chaves de dado pessoal ausentes do mascaramento. O commit anterior desta PR desenhou a solução como duas listas paralelas (`DEFAULT_SENSITIVE_KEYS` e `DEFAULT_PARTIAL_MASK_KEYS`), com o tipo de máscara implícito em qual lista a chave caiu. A PR está em draft e nenhum serviço chegou a consumir, então o desenho foi substituído agora por um mapa campo → estratégia, antes do merge. Defeitos medidos das duas listas: e-mail mascarado com regra de documento vaza o domínio (`joao.silva@maistodos.com.br` → `*****m.br`); chave Pix não tem formato único (CPF, e-mail, telefone ou aleatória — tratamento como string uniforme já custou o bug de 2 anos e meio BANKS-4220/CNT-3280); e campo novo exigia PR + release + bump em 6 repos.
+
+### BREAKING
+
+- `DEFAULT_SENSITIVE_KEYS` e `DEFAULT_PARTIAL_MASK_KEYS` foram removidas da API pública
+- `RedactionFilter` não aceita mais `sensitive_keys`/`partial_mask_keys` — aceita `mask_policy` (mapa campo → `Mask`); `redact_keys` segue funcionando (1 serviço usa) e passa a significar `Mask.FULL` via setdefault
+- Campos genéricos (`email`, `phone`, `document_number`, `cpf`, `cnpj`, `document`) passam a ser mascarados em todos os consumidores sem opt-in
 
 ### Mudanças
 
 #### `logging.py`
 
-- Nova constante `DEFAULT_PARTIAL_MASK_KEYS`, separada de `DEFAULT_SENSITIVE_KEYS`: chaves de dado pessoal (`document`, `document_number`, `account_document`, `cpf`, `cnpj`, `email`, `phone`, `pix_key`, `addressing_key`) com mascaramento PARCIAL — últimos 4 caracteres preservados, que a sustentação usa para localizar cliente (ver CNT-3618, no mesmo épico)
-- `DEFAULT_SENSITIVE_KEYS` (credencial) segue com mascaramento TOTAL
-- `RedactionFilter` ganha parâmetro `partial_mask_keys` e aplica a máscara certa por lista
-- Chave de credencial agora mascara qualquer tipo de valor (`int`, `dict`, `bytes`) — antes só `str`, e CPF/CNPJ como `int` passavam em claro
-- Chave de PII com valor não-`str` cai em `_REDACTED` total (não dá pra mascarar parcialmente o que não é texto)
-- `name` e `key` genéricos, sugeridos pelo ticket, NÃO foram incluídos: mascarariam nome de serviço/módulo e chave de dicionário arbitrária, produzindo log ilegível
+- Novo enum `Mask(str, Enum)`: `FULL` (credencial: nada aproveitável), `LAST4` (documento: sustentação localiza pelos 4 dígitos), `EMAIL` (`j***@maistodos.com.br` — domínio preservado), `PIX` (detecta o formato do valor e delega)
+- `DEFAULT_MASK_POLICY` (PII universal) sempre entra; `CONTA_DIGITAL_MASK_POLICY` (`account_document`, `pix_key`, `addressing_key`) só entra se o serviço optar via `mask_policy` — o que o consumidor passa faz merge por cima e pode sobrescrever um default
+- Estratégia inválida em `mask_policy` levanta `ValueError` no `__init__`, não em runtime
+- `LAST4`/`EMAIL`/`PIX` aceitam qualquer tipo via `str(value)` — documento que chega como `int` vira máscara parcial (antes virava `*****` total)
+- `_mask_last4` não devolve mais valores de até 4 caracteres em claro (`mask_document("1234")` devolvia `"1234"` em claro — vazamento corrigido de propósito); `mask_document` público segue intacto para a migração dos serviços
+- `configure_logging` ganha `mask_policy` e repassa ao filtro
+
+#### `fastapi.py` / `aws_lambda.py` / `chalice.py`
+
+- Os três `instrument_*` ganham o parâmetro `mask_policy` e repassam ao `configure_logging`, documentado no docstring com o exemplo de merge
 
 #### `__init__.py`
 
-- `mask_document` exportado publicamente — extração da `_mask_document` que vive duplicada em credit-api, payroll-api e transactional-facade (e ausente no account-api); é a peça que a migração dos serviços vai consumir
+- Exportados: `Mask`, `DEFAULT_MASK_POLICY`, `CONTA_DIGITAL_MASK_POLICY`, `RedactionFilter`, `mask_document`
 
 #### Testes
 
-- 4 novos casos em `test_logging.py`: documento aninhado em `props`, valor não-`str` em chave sensível, máscara parcial preservando últimos dígitos e `mask_document` público tolerante a `None`/`""`
-- Os 4 falhavam antes do fix, confirmando o diagnóstico corrigido
+- 9 novos casos em `test_logging.py`: e-mail preserva domínio, Pix detecta os 4 formatos, documento `int` vira máscara parcial, consumidor estende e sobrescreve a policy, domínio de Conta Digital fora do default, estratégia inválida no startup, credencial mascara qualquer tipo e `redact_keys` não sobrescreve a policy
+- Testes que usavam `sensitive_keys`/`partial_mask_keys` atualizados para `mask_policy`
 
 ---
 

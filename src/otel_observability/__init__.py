@@ -69,7 +69,9 @@ from .config import OTEL_ENV_KEYS, TelemetryConfig, seed_otel_env
 # FastAPI integration (module always exists, but may raise ImportError if deps missing)
 from .fastapi import RequestLoggingMiddleware, instrument_fastapi
 from .logging import (
-    DEFAULT_SENSITIVE_KEYS,
+    CONTA_DIGITAL_MASK_POLICY,
+    DEFAULT_MASK_POLICY,
+    Mask,
     RedactionFilter,
     clear_log_context,
     configure_logging,
@@ -126,8 +128,10 @@ except PackageNotFoundError:  # pragma: no cover - só ocorre fora de instalaç�
     __version__ = "0.0.0"
 
 __all__ = [
-    "DEFAULT_SENSITIVE_KEYS",
+    "CONTA_DIGITAL_MASK_POLICY",
+    "DEFAULT_MASK_POLICY",
     "OTEL_ENV_KEYS",
+    "Mask",
     "RedactionFilter",
     "RequestLoggingMiddleware",
     "TelemetryConfig",

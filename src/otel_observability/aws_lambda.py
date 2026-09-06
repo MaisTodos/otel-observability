@@ -30,6 +30,7 @@ def instrument_lambda_handler(
     auto_extract_context: bool = True,
     auto_instrument_libs: bool = True,
     redact_keys: Iterable[str] | None = None,
+    mask_policy: dict | None = None,
 ):
     """
     Decorator para instrumentar AWS Lambda handler com tracing distribuído.
@@ -49,6 +50,13 @@ def instrument_lambda_handler(
         auto_instrument_libs: Se True, auto-instrumenta bibliotecas comuns (boto3, httpx, etc.)
         redact_keys: Chaves extras cujos valores são mascarados nos logs, além
             das chaves padrão de credencial.
+        mask_policy: Mapa campo -> Mask estendendo DEFAULT_MASK_POLICY (o default
+            universal sempre entra; o que passar aqui faz merge por cima e pode
+            sobrescrever um default). Exemplo:
+            >>> from otel_observability import CONTA_DIGITAL_MASK_POLICY, Mask
+            >>> instrument_lambda_handler(
+            ...     mask_policy={**CONTA_DIGITAL_MASK_POLICY, "xpto": Mask.LAST4}
+            ... )
 
     Example:
         >>> from otel_observability.aws_lambda import instrument_lambda_handler
@@ -80,6 +88,7 @@ def instrument_lambda_handler(
                     level=cfg.log_level,
                     json_format=cfg.resolve_json_logs(json_logs, default=True),
                     redact_keys=redact_keys,
+                    mask_policy=mask_policy,
                 )
 
             # Inicializar telemetria

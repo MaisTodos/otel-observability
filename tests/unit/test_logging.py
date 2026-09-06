@@ -374,7 +374,7 @@ class TestRedactionFilter:
         from otel_observability.logging import RedactionFilter
 
         record = self._record(custom_secret="x", access_token="y")
-        RedactionFilter({"custom_secret"}).filter(record)
+        RedactionFilter(redact_keys={"custom_secret"}).filter(record)
         assert record.custom_secret == "*****"
         assert record.access_token == "*****"
 
@@ -407,10 +407,10 @@ class TestRedactionFilter:
 
     def test_redige_documento_aninhado_em_props(self):
         """O caso observado em producao: mesma chave, mascarada no topo e em claro aninhada."""
-        from otel_observability.logging import RedactionFilter
+        from otel_observability.logging import CONTA_DIGITAL_MASK_POLICY, RedactionFilter
 
         record = self._record(props={"header": {"account_document": "12345678000199"}})
-        RedactionFilter().filter(record)
+        RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY).filter(record)
         assert record.props["header"]["account_document"] != "12345678000199"
 
     def test_redige_chave_sensivel_com_valor_nao_str(self):
@@ -423,12 +423,89 @@ class TestRedactionFilter:
         assert record.api_key != b"segredo"
 
     def test_mascara_parcial_preserva_ultimos_digitos(self):
-        from otel_observability.logging import RedactionFilter
+        from otel_observability.logging import CONTA_DIGITAL_MASK_POLICY, RedactionFilter
 
         record = self._record(account_document="12345678000199")
-        RedactionFilter().filter(record)
+        RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY).filter(record)
         assert record.account_document.endswith("0199")
         assert "12345678" not in record.account_document
+
+    def test_email_preserva_dominio(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(email="joao.silva@maistodos.com.br")
+        RedactionFilter().filter(record)
+        assert record.email.endswith("@maistodos.com.br")
+        assert "joao.silva" not in record.email
+
+    def test_pix_key_detecta_formato(self):
+        from otel_observability.logging import CONTA_DIGITAL_MASK_POLICY, RedactionFilter
+
+        f = RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY)
+        casos = {
+            "joao@x.com.br": lambda v: v.endswith("@x.com.br") and "joao" not in v,
+            "12345678901": lambda v: v.endswith("8901"),
+            "+5511987654321": lambda v: v.endswith("4321"),
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890": lambda v: set(v) == {"*"},
+        }
+        for valor, ok in casos.items():
+            record = self._record(pix_key=valor)
+            f.filter(record)
+            assert ok(record.pix_key), f"{valor} -> {record.pix_key}"
+
+    def test_documento_int_vira_mascara_parcial(self):
+        """CPF chega como int com frequencia. Antes virava ***** total."""
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(document_number=12345678901)
+        RedactionFilter().filter(record)
+        assert str(record.document_number).endswith("8901")
+
+    def test_consumidor_estende_a_policy(self):
+        from otel_observability.logging import Mask, RedactionFilter
+
+        record = self._record(numero_proposta="99887766", password="x")
+        RedactionFilter(mask_policy={"numero_proposta": Mask.LAST4}).filter(record)
+        assert record.numero_proposta.endswith("7766")
+        assert record.password != "x"  # default universal continua valendo
+
+    def test_consumidor_sobrescreve_default(self):
+        from otel_observability.logging import Mask, RedactionFilter
+
+        record = self._record(email="a@b.com")
+        RedactionFilter(mask_policy={"email": Mask.FULL}).filter(record)
+        assert set(record.email) == {"*"}
+
+    def test_dominio_nao_esta_no_default(self):
+        """A lib nao conhece a Conta Digital sem o servico optar."""
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(addressing_key="joao@x.com")
+        RedactionFilter().filter(record)
+        assert record.addressing_key == "joao@x.com"
+
+    def test_estrategia_invalida_falha_no_startup(self):
+        from otel_observability.logging import RedactionFilter
+
+        with pytest.raises(ValueError, match="not a valid Mask"):
+            RedactionFilter(mask_policy={"x": "last5"})
+
+    def test_credencial_mascara_qualquer_tipo(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(api_key=b"segredo", client_secret={"v": 1})
+        RedactionFilter().filter(record)
+        assert record.api_key != b"segredo"
+        assert record.client_secret != {"v": 1}
+
+    def test_redact_keys_nao_sobrescreve_policy(self):
+        """redact_keys e o mecanismo antigo: setdefault — a policy vence na colisao."""
+        from otel_observability.logging import Mask, RedactionFilter
+
+        record = self._record(email="joao@x.com")
+        RedactionFilter(redact_keys=["email"], mask_policy={"email": Mask.EMAIL}).filter(record)
+        assert record.email.endswith("@x.com")
+        assert "joao" not in record.email
 
 
 @pytest.mark.unit

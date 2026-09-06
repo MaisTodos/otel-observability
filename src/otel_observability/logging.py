@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from contextvars import ContextVar
+from enum import Enum
 import logging
 import os
 import sys
@@ -95,36 +96,39 @@ class TraceContextFilter(logging.Filter):
         return True
 
 
-# Chaves cujos valores são mascarados nos logs por padrão. Comparação case-insensitive.
-DEFAULT_SENSITIVE_KEYS = frozenset(
-    {
-        "authorization",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "password",
-        "secret",
-        "api_key",
-        "dd_api_key",
-    }
-)
+class Mask(str, Enum):
+    """Estratégia de mascaramento aplicada a um campo de log."""
 
-# Dado pessoal: mascaramento PARCIAL, ultimos 4 caracteres preservados.
-# Sustentacao localiza cliente por esses digitos — mascarar tudo quebra
-# investigacao e runbook (ver CNT-3618, no mesmo epico).
-DEFAULT_PARTIAL_MASK_KEYS = frozenset(
-    {
-        "document",
-        "document_number",
-        "account_document",
-        "cpf",
-        "cnpj",
-        "email",
-        "phone",
-        "pix_key",
-        "addressing_key",
-    }
-)
+    FULL = "full"  # credencial: nada aproveitavel
+    LAST4 = "last4"  # documento: sustentacao localiza pelos 4 digitos
+    EMAIL = "email"  # j***@maistodos.com.br — dominio preservado
+    PIX = "pix"  # detecta o formato do valor e delega
+
+
+# PII universal — vale em qualquer produto brasileiro.
+DEFAULT_MASK_POLICY = {
+    "authorization": Mask.FULL,
+    "access_token": Mask.FULL,
+    "refresh_token": Mask.FULL,
+    "client_secret": Mask.FULL,
+    "password": Mask.FULL,
+    "secret": Mask.FULL,
+    "api_key": Mask.FULL,
+    "dd_api_key": Mask.FULL,
+    "document": Mask.LAST4,
+    "document_number": Mask.LAST4,
+    "cpf": Mask.LAST4,
+    "cnpj": Mask.LAST4,
+    "phone": Mask.LAST4,
+    "email": Mask.EMAIL,
+}
+
+# Vocabulário do domínio Conta Digital — o serviço OPTA por incluí-lo.
+CONTA_DIGITAL_MASK_POLICY = {
+    "account_document": Mask.LAST4,
+    "pix_key": Mask.PIX,
+    "addressing_key": Mask.PIX,
+}
 
 _REDACTED = "*****"
 
@@ -139,8 +143,40 @@ def mask_document(value: str | None, visible: int = 4) -> str | None:
         return None
     texto = str(value)
     if len(texto) <= visible:
-        return texto
+        # Valor curto demais pra preservar sufixo sem entregar o dado inteiro.
+        # Devolver em claro seria vazamento silencioso — mascara tudo.
+        return "*" * len(texto)
     return "*" * (len(texto) - visible) + texto[-visible:]
+
+
+def _mask_last4(value: object) -> str:
+    texto = str(value)
+    if len(texto) <= 4:
+        return "*" * len(texto)  # nunca devolver valor curto em claro
+    return "*" * (len(texto) - 4) + texto[-4:]
+
+
+def _mask_email(value: object) -> str:
+    texto = str(value)
+    local, sep, dominio = texto.partition("@")
+    if not sep:
+        return _mask_last4(texto)  # nao parece email, cai no generico
+    visivel = local[:1] if local else ""
+    return f"{visivel}{'*' * max(len(local) - 1, 1)}@{dominio}"
+
+
+def _mask_pix(value: object) -> str:
+    """Chave Pix é CPF, email, telefone ou aleatória — detecta e delega."""
+    texto = str(value)
+    if "@" in texto:
+        return _mask_email(texto)
+    somente_digitos = texto.lstrip("+").replace(".", "").replace("-", "")
+    if somente_digitos.isdigit():
+        return _mask_last4(texto)
+    return _REDACTED  # aleatoria: os 4 ultimos nao ajudam ninguem
+
+
+_ESTRATEGIAS = {Mask.LAST4: _mask_last4, Mask.EMAIL: _mask_email, Mask.PIX: _mask_pix}
 
 
 # Atributos padrão do LogRecord que nunca devem ser inspecionados/redigidos.
@@ -178,30 +214,28 @@ class RedactionFilter(logging.Filter):
     """Mascara valores sensíveis nos campos extra de cada log record.
 
     Roda antes dos handlers (stdout JSON e OTLP), então tanto o stream local
-    quanto o que é exportado pro Datadog saem mascarados. O mascaramento é
-    baseado em nome de chave e recursivo sobre dicts/listas/tuplas. Centraliza
-    na lib o que cada serviço hoje reimplementa por conta própria.
+    quanto o que é exportado pro Datadog saem mascarados. O mascaramento segue
+    um mapa campo -> `Mask` (DEFAULT_MASK_POLICY + o que o consumidor passar em
+    `mask_policy`), case-insensitive e recursivo sobre dicts/listas/tuplas.
+    Centraliza na lib o que cada serviço hoje reimplementa por conta própria.
 
-    Chaves de credencial (DEFAULT_SENSITIVE_KEYS) são mascaradas por completo;
-    chaves de dado pessoal (DEFAULT_PARTIAL_MASK_KEYS) preservam os últimos
-    caracteres do valor via `mask_document`.
+    `redact_keys` (mecanismo legado, 1 serviço em produção) equivale a
+    `Mask.FULL` para as chaves listadas, via setdefault — a policy vence se a
+    chave já tiver estratégia.
     """
 
     def __init__(
         self,
-        sensitive_keys: Iterable[str] | None = None,
-        partial_mask_keys: Iterable[str] | None = None,
+        mask_policy: dict[str, "Mask | str"] | None = None,
+        redact_keys: Iterable[str] | None = None,
     ) -> None:
         super().__init__()
-        keys = set(DEFAULT_SENSITIVE_KEYS)
-        if sensitive_keys:
-            keys.update(key.lower() for key in sensitive_keys)
-        self._keys = frozenset(keys)
-
-        partial_keys = set(DEFAULT_PARTIAL_MASK_KEYS)
-        if partial_mask_keys:
-            partial_keys.update(key.lower() for key in partial_mask_keys)
-        self._partial_keys = frozenset(partial_keys)
+        policy = dict(DEFAULT_MASK_POLICY)
+        for chave, estrategia in (mask_policy or {}).items():
+            policy[chave.lower()] = Mask(estrategia)  # ValueError cedo, no startup
+        for chave in redact_keys or []:
+            policy.setdefault(chave.lower(), Mask.FULL)
+        self._policy = policy
 
     def filter(self, record: logging.LogRecord) -> bool:
         for key, value in list(record.__dict__.items()):
@@ -212,11 +246,11 @@ class RedactionFilter(logging.Filter):
 
     def _redact(self, key: str, value: Any) -> Any:
         if isinstance(key, str):
-            chave = key.lower()
-            if chave in self._keys:
+            estrategia = self._policy.get(key.lower())
+            if estrategia is Mask.FULL:
                 return _REDACTED
-            if chave in self._partial_keys:
-                return mask_document(value) if isinstance(value, str) else _REDACTED
+            if estrategia is not None:
+                return _ESTRATEGIAS[estrategia](value)
         if isinstance(value, dict):
             return {k: self._redact(k, v) for k, v in value.items()}
         if isinstance(value, list):
@@ -288,6 +322,7 @@ def configure_logging(
     json_format: bool = False,
     logger_name: str | None = None,
     redact_keys: Iterable[str] | None = None,
+    mask_policy: dict | None = None,
 ) -> None:
     """
     Configure logging with trace correlation.
@@ -296,6 +331,13 @@ def configure_logging(
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
         json_format: Use JSON formatter (recommended for production).
         logger_name: Specific logger to configure. If None, configures root logger.
+        redact_keys: Chaves extras mascaradas por completo (Mask.FULL), mecanismo
+            legado. Se a chave já tiver estratégia em mask_policy, a policy vence.
+        mask_policy: Mapa campo -> Mask estendendo DEFAULT_MASK_POLICY (o default
+            universal sempre entra; o que passar aqui faz merge por cima e pode
+            sobrescrever um default). Exemplo:
+            >>> from otel_observability import CONTA_DIGITAL_MASK_POLICY
+            >>> configure_logging(mask_policy=CONTA_DIGITAL_MASK_POLICY)
 
     Example:
         >>> from otel_observability import configure_logging
@@ -318,7 +360,7 @@ def configure_logging(
     # Add redaction filter (mascara dados sensíveis antes do formatter).
     # Guardado em global para o handler OTLP reaproveitar o mesmo filtro.
     global _active_redaction_filter
-    _active_redaction_filter = RedactionFilter(redact_keys)
+    _active_redaction_filter = RedactionFilter(mask_policy=mask_policy, redact_keys=redact_keys)
     handler.addFilter(_active_redaction_filter)
 
     # Set formatter
