@@ -75,6 +75,7 @@ from .logging import (
     configure_logging,
     get_log_context,
     get_logger,
+    mask_document,
     set_log_context,
 )
 from .tracer import (
@@ -142,6 +143,7 @@ __all__ = [
     "init_telemetry",
     "instrument_fastapi",
     "instrument_lambda_handler",
+    "mask_document",
     "seed_otel_env",
     "set_log_context",
     "shutdown_telemetry",

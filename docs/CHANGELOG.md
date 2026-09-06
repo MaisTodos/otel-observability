@@ -1,5 +1,33 @@
 # Changelog
 
+## [CNT-3524] — Chaves de PII no RedactionFilter, máscara parcial e `mask_document` público
+
+### Contexto
+
+O ticket CNT-3524 reportava que a recursão do `RedactionFilter` não alcançava chaves aninhadas dentro de `props`. O diagnóstico está incorreto: a recursão sobre `dict`/`list`/`tuple` já funcionava. O caso real (`account_document` em claro dentro de `props.header`) ocorria porque chaves de dado pessoal nunca fizeram parte de `DEFAULT_SENSITIVE_KEYS` — a lista só tinha credencial. O que mascarava o documento no topo era a função `_mask_document` duplicada em cada serviço, que não roda sobre valores aninhados.
+
+### Mudanças
+
+#### `logging.py`
+
+- Nova constante `DEFAULT_PARTIAL_MASK_KEYS`, separada de `DEFAULT_SENSITIVE_KEYS`: chaves de dado pessoal (`document`, `document_number`, `account_document`, `cpf`, `cnpj`, `email`, `phone`, `pix_key`, `addressing_key`) com mascaramento PARCIAL — últimos 4 caracteres preservados, que a sustentação usa para localizar cliente (ver CNT-3618, no mesmo épico)
+- `DEFAULT_SENSITIVE_KEYS` (credencial) segue com mascaramento TOTAL
+- `RedactionFilter` ganha parâmetro `partial_mask_keys` e aplica a máscara certa por lista
+- Chave de credencial agora mascara qualquer tipo de valor (`int`, `dict`, `bytes`) — antes só `str`, e CPF/CNPJ como `int` passavam em claro
+- Chave de PII com valor não-`str` cai em `_REDACTED` total (não dá pra mascarar parcialmente o que não é texto)
+- `name` e `key` genéricos, sugeridos pelo ticket, NÃO foram incluídos: mascarariam nome de serviço/módulo e chave de dicionário arbitrária, produzindo log ilegível
+
+#### `__init__.py`
+
+- `mask_document` exportado publicamente — extração da `_mask_document` que vive duplicada em credit-api, payroll-api e transactional-facade (e ausente no account-api); é a peça que a migração dos serviços vai consumir
+
+#### Testes
+
+- 4 novos casos em `test_logging.py`: documento aninhado em `props`, valor não-`str` em chave sensível, máscara parcial preservando últimos dígitos e `mask_document` público tolerante a `None`/`""`
+- Os 4 falhavam antes do fix, confirmando o diagnóstico corrigido
+
+---
+
 ## [Fase 1] — Endpoints por sinal e OTLP log export
 
 ### Contexto

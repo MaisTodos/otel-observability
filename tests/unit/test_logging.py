@@ -404,3 +404,41 @@ class TestRedactionFilter:
         payload = json.loads(captured[-1])
         assert payload["props"]["password"] == "*****"
         assert payload["props"]["account_id"] == "1"
+
+    def test_redige_documento_aninhado_em_props(self):
+        """O caso observado em producao: mesma chave, mascarada no topo e em claro aninhada."""
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(props={"header": {"account_document": "12345678000199"}})
+        RedactionFilter().filter(record)
+        assert record.props["header"]["account_document"] != "12345678000199"
+
+    def test_redige_chave_sensivel_com_valor_nao_str(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(cpf=12345678901, cnpj={"numero": "123"}, api_key=b"segredo")
+        RedactionFilter().filter(record)
+        assert record.cpf != 12345678901
+        assert record.cnpj != {"numero": "123"}
+        assert record.api_key != b"segredo"
+
+    def test_mascara_parcial_preserva_ultimos_digitos(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(account_document="12345678000199")
+        RedactionFilter().filter(record)
+        assert record.account_document.endswith("0199")
+        assert "12345678" not in record.account_document
+
+
+@pytest.mark.unit
+class TestMaskDocument:
+    """Testes para mask_document (utilitário público de máscara parcial)."""
+
+    def test_mask_document_e_utilitario_publico(self):
+        from otel_observability import mask_document
+
+        assert mask_document("12345678000199").endswith("0199")
+        assert "12345678" not in mask_document("12345678000199")
+        assert mask_document(None) is None
+        assert mask_document("") == ""

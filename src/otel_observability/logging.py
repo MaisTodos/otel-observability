@@ -109,7 +109,39 @@ DEFAULT_SENSITIVE_KEYS = frozenset(
     }
 )
 
+# Dado pessoal: mascaramento PARCIAL, ultimos 4 caracteres preservados.
+# Sustentacao localiza cliente por esses digitos — mascarar tudo quebra
+# investigacao e runbook (ver CNT-3618, no mesmo epico).
+DEFAULT_PARTIAL_MASK_KEYS = frozenset(
+    {
+        "document",
+        "document_number",
+        "account_document",
+        "cpf",
+        "cnpj",
+        "email",
+        "phone",
+        "pix_key",
+        "addressing_key",
+    }
+)
+
 _REDACTED = "*****"
+
+
+def mask_document(value: str | None, visible: int = 4) -> str | None:
+    """Mascara um documento preservando os ultimos `visible` caracteres.
+
+    Extraido da funcao `_mask_document` que hoje vive duplicada byte a byte em
+    credit-api, payroll-api e transactional-facade (e ausente no account-api).
+    """
+    if value is None:
+        return None
+    texto = str(value)
+    if len(texto) <= visible:
+        return texto
+    return "*" * (len(texto) - visible) + texto[-visible:]
+
 
 # Atributos padrão do LogRecord que nunca devem ser inspecionados/redigidos.
 _STANDARD_LOGRECORD_ATTRS = frozenset(
@@ -149,14 +181,27 @@ class RedactionFilter(logging.Filter):
     quanto o que é exportado pro Datadog saem mascarados. O mascaramento é
     baseado em nome de chave e recursivo sobre dicts/listas/tuplas. Centraliza
     na lib o que cada serviço hoje reimplementa por conta própria.
+
+    Chaves de credencial (DEFAULT_SENSITIVE_KEYS) são mascaradas por completo;
+    chaves de dado pessoal (DEFAULT_PARTIAL_MASK_KEYS) preservam os últimos
+    caracteres do valor via `mask_document`.
     """
 
-    def __init__(self, sensitive_keys: Iterable[str] | None = None) -> None:
+    def __init__(
+        self,
+        sensitive_keys: Iterable[str] | None = None,
+        partial_mask_keys: Iterable[str] | None = None,
+    ) -> None:
         super().__init__()
         keys = set(DEFAULT_SENSITIVE_KEYS)
         if sensitive_keys:
             keys.update(key.lower() for key in sensitive_keys)
         self._keys = frozenset(keys)
+
+        partial_keys = set(DEFAULT_PARTIAL_MASK_KEYS)
+        if partial_mask_keys:
+            partial_keys.update(key.lower() for key in partial_mask_keys)
+        self._partial_keys = frozenset(partial_keys)
 
     def filter(self, record: logging.LogRecord) -> bool:
         for key, value in list(record.__dict__.items()):
@@ -166,8 +211,12 @@ class RedactionFilter(logging.Filter):
         return True
 
     def _redact(self, key: str, value: Any) -> Any:
-        if isinstance(key, str) and key.lower() in self._keys and isinstance(value, str):
-            return _REDACTED
+        if isinstance(key, str):
+            chave = key.lower()
+            if chave in self._keys:
+                return _REDACTED
+            if chave in self._partial_keys:
+                return mask_document(value) if isinstance(value, str) else _REDACTED
         if isinstance(value, dict):
             return {k: self._redact(k, v) for k, v in value.items()}
         if isinstance(value, list):
