@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.sampling import Decision, ParentBased
 from opentelemetry.trace import (
     NonRecordingSpan,
@@ -9,6 +10,7 @@ from opentelemetry.trace import (
     StatusCode,
     TraceFlags,
     set_span_in_context,
+    set_tracer_provider,
 )
 import pytest
 
@@ -166,6 +168,26 @@ class TestGetTracer:
 
             assert tracer == mock_tracer
             mock_trace_module.get_tracer.assert_called_once_with("test.module")
+
+    def test_get_tracer_sem_nome_resolve_modulo_chamador(self, reset_telemetry):
+        """Tracer sem nome resolve o __name__ do módulo chamador."""
+        # Provider real global: sem ele trace_api.get_tracer devolve ProxyTracer,
+        # que não expõe _instrumentation_scope.
+        set_tracer_provider(TracerProvider())
+
+        tracer = get_tracer()
+
+        # O tracer do SDK expõe o InstrumentationScope em _instrumentation_scope
+        assert tracer._instrumentation_scope.name == __name__
+        assert tracer._instrumentation_scope.name != "otel_observability.tracer"
+
+    def test_get_tracer_com_nome_explicito_e_respeitado(self, reset_telemetry):
+        """Tracer com nome explícito respeita o argumento."""
+        set_tracer_provider(TracerProvider())
+
+        tracer = get_tracer("meu.modulo")
+
+        assert tracer._instrumentation_scope.name == "meu.modulo"
 
 
 @pytest.mark.unit

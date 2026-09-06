@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from functools import wraps
+import inspect
 import logging
 from typing import Any
 
@@ -124,21 +125,26 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         logger.info("Telemetry shutdown complete")
 
 
-def get_tracer(name: str = __name__) -> trace_api.Tracer:
+def get_tracer(name: str | None = None) -> trace_api.Tracer:
     """
     Get a tracer instance.
 
     Args:
-        name: Tracer name (usually __name__ of the module).
+        name: Tracer name. Se omitido, resolve o __name__ do módulo chamador.
 
     Returns:
         Tracer instance.
 
     Example:
-        >>> tracer = get_tracer(__name__)
+        >>> tracer = get_tracer()
         >>> with tracer.start_as_current_span("my_operation"):
         ...     pass
     """
+    if name is None:
+        frame = inspect.currentframe()
+        caller = frame.f_back if frame is not None else None
+        name = caller.f_globals.get("__name__", __name__) if caller is not None else __name__
+
     return trace_api.get_tracer(name)
 
 
