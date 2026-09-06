@@ -426,6 +426,7 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
         log_exporter = OTLPLogExporter(
             endpoint=endpoint,
             headers=config.otlp_headers or {},
+            timeout=config.export_timeout,
         )
         _logger_provider.add_log_record_processor(FlattenAttributesLogRecordProcessor())
         _logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))

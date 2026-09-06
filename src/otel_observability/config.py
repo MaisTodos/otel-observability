@@ -22,11 +22,12 @@ class TelemetryConfig:
     is_lambda: bool
     enable_console_export: bool
     log_level: str
-    log_format: str | None
     sample_rate: float
     dogstatsd_enabled: bool
     dogstatsd_host: str
     dogstatsd_port: int
+    log_format: str | None = None
+    export_timeout: int = 3
 
     @classmethod
     def from_env(cls) -> "TelemetryConfig":
@@ -41,6 +42,8 @@ class TelemetryConfig:
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: Traces-specific endpoint (overrides base)
             OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics-specific endpoint (overrides base)
             OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: Logs-specific endpoint (enables OTLP log export)
+            OTEL_EXPORTER_OTLP_TIMEOUT: OTLP exporter timeout in seconds (default: 3). Cap do
+                retry interno do exporter — protege o flush de Lambda contra backend fora.
             OTEL_TRACES_ENABLED: Explicitly enable/disable traces exporter (default: true if endpoint available)
             OTEL_EXPORTER_OTLP_HEADERS: OTLP headers (format: key1=value1,key2=value2)
             DD_API_KEY: Datadog API key (if sending directly)
@@ -108,6 +111,7 @@ class TelemetryConfig:
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
             log_level=os.getenv("OTEL_LOG_LEVEL", "INFO").upper(),
             log_format=(os.getenv("OTEL_LOG_FORMAT") or None),
+            export_timeout=int(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "3")),
             sample_rate=float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")),
             dogstatsd_enabled=dogstatsd_enabled,
             dogstatsd_host=dogstatsd_host,

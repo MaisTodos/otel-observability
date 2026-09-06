@@ -112,6 +112,31 @@ class TestTelemetryConfig:
                 config = TelemetryConfig.from_env()
             assert config.service_name == "unknown-service"
 
+    def test_config_construivel_sem_log_format(self):
+        """Consumidor que constroi config propria (parametro `config=` dos
+        instrument_*) nao pode quebrar por causa de campo novo."""
+        config = TelemetryConfig(
+            service_name="svc",
+            environment="prod",
+            service_version="1.0.0",
+            otlp_endpoint="http://x:4318",
+            otlp_traces_endpoint=None,
+            otlp_metrics_endpoint=None,
+            otlp_logs_endpoint=None,
+            traces_enabled=False,
+            otlp_headers=None,
+            is_lambda=False,
+            enable_console_export=False,
+            log_level="INFO",
+            sample_rate=1.0,
+            dogstatsd_enabled=False,
+            dogstatsd_host="localhost",
+            dogstatsd_port=8125,
+        )
+
+        assert config.log_format is None
+        assert config.sample_rate == 1.0
+
     # ------------------------------------------------------------------
     # Signal-specific endpoint resolution
     # ------------------------------------------------------------------

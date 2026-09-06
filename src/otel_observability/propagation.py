@@ -232,7 +232,19 @@ def extract_context_from_sqs_message(message: dict[str, Any]):
         if value:
             carrier[key] = value
 
-    return extract(carrier) if carrier else context.get_current()
+    # Carrier sem contexto W3C (traceparent/baggage) nao carrega trace: o
+    # propagador devolveria um Context() novo e o span perderia o pai. Atributo
+    # de negocio no carrier nao pode disparar extract. Baggage entra no gate
+    # porque produtor nao-instrumentado gera carrier so de baggage (round-trip
+    # do plano 04) — so traceparent no gate mataria o baggage desses carriers.
+    atual = context.get_current()
+    if "traceparent" in carrier or "baggage" in carrier:
+        # context= explicito faz o propagador COMPOR sobre o contexto atual em vez
+        # de criar um Context() novo. Sem isso, carrier so com baggage (produtor
+        # que propaga baggage mas cujo span nao foi amostrado) preservava o
+        # baggage e perdia o pai.
+        return extract(carrier, context=atual)
+    return atual
 
 
 def extract_context_from_sns_message(record: dict[str, Any]):
@@ -266,7 +278,19 @@ def extract_context_from_sns_message(record: dict[str, Any]):
         if value:
             carrier[key] = value
 
-    return extract(carrier) if carrier else context.get_current()
+    # Carrier sem contexto W3C (traceparent/baggage) nao carrega trace: o
+    # propagador devolveria um Context() novo e o span perderia o pai. Atributo
+    # de negocio no carrier nao pode disparar extract. Baggage entra no gate
+    # porque produtor nao-instrumentado gera carrier so de baggage (round-trip
+    # do plano 04) — so traceparent no gate mataria o baggage desses carriers.
+    atual = context.get_current()
+    if "traceparent" in carrier or "baggage" in carrier:
+        # context= explicito faz o propagador COMPOR sobre o contexto atual em vez
+        # de criar um Context() novo. Sem isso, carrier so com baggage (produtor
+        # que propaga baggage mas cujo span nao foi amostrado) preservava o
+        # baggage e perdia o pai.
+        return extract(carrier, context=atual)
+    return atual
 
 
 def extract_context_from_eventbridge_detail(detail: dict[str, Any]):

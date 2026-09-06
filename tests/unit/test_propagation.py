@@ -2,8 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-from opentelemetry import baggage
+from opentelemetry import baggage, trace
 from opentelemetry import context as otel_context
+from opentelemetry.sdk.trace import TracerProvider
 import pytest
 
 from otel_observability.propagation import (
@@ -381,3 +382,50 @@ class TestBaggageRoundTrip:
         record = {"Sns": {"MessageAttributes": attrs_to_sns_shape(attrs)}}
         recovered = extract_context_from_sns_message(record)
         assert baggage.get_baggage("journey", recovered) == "pix_cash_out"
+
+
+@pytest.mark.unit
+def test_carrier_sem_traceparent_preserva_contexto_do_pai():
+    """Produtor nao-instrumentado manda so atributo de negocio. O carrier fica
+    nao-vazio, mas sem traceparent — extract() devolveria contexto novo e
+    quebraria a correlacao com o pai."""
+    mensagem = {"messageAttributes": {"pedido_id": {"stringValue": "123"}}}
+
+    # Provider local: com o global da API (ProxyTracer) o span pai teria
+    # trace_id 0 e a asserção passaria vacuamente mesmo com o bug.
+    tracer = TracerProvider().get_tracer(__name__)
+    with tracer.start_as_current_span("pai") as pai:
+        ctx = extract_context_from_sqs_message(mensagem)
+        recuperado = trace.get_current_span(ctx).get_span_context()
+
+        assert recuperado.trace_id == pai.get_span_context().trace_id
+
+
+@pytest.mark.unit
+def test_carrier_sns_sem_traceparent_preserva_contexto_do_pai():
+    """Espelho SQS→SNS: MessageAttributes de negocio sem traceparent nao pode
+    orfanar o span pai."""
+    record = {"Sns": {"MessageAttributes": {"pedido_id": {"Value": "123"}}}}
+
+    tracer = TracerProvider().get_tracer(__name__)
+    with tracer.start_as_current_span("pai") as pai:
+        ctx = extract_context_from_sns_message(record)
+        recuperado = trace.get_current_span(ctx).get_span_context()
+
+        assert recuperado.trace_id == pai.get_span_context().trace_id
+
+
+@pytest.mark.unit
+def test_carrier_com_traceparent_ainda_extrai():
+    """Carrier com traceparent continua extraindo o contexto remoto — sem
+    regressao do plano 04 (is_remote distingue extract real de passthrough)."""
+    tracer = TracerProvider().get_tracer(__name__)
+    with tracer.start_as_current_span("pai") as pai:
+        attrs = inject_context_into_sqs_message_attributes()
+        mensagem = {"messageAttributes": attrs_to_lambda_shape(attrs)}
+
+        ctx = extract_context_from_sqs_message(mensagem)
+        recuperado = trace.get_current_span(ctx).get_span_context()
+
+        assert recuperado.trace_id == pai.get_span_context().trace_id
+        assert recuperado.is_remote is True

@@ -70,6 +70,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
         otlp_exporter = OTLPSpanExporter(
             endpoint=_config.otlp_traces_endpoint.strip(),
             headers=_config.otlp_headers or {},
+            timeout=_config.export_timeout,
         )
         _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
     else:

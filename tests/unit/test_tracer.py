@@ -1,5 +1,6 @@
 """Testes unitários para o módulo tracer."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 from opentelemetry.sdk.trace import TracerProvider
@@ -15,6 +16,7 @@ from opentelemetry.trace import (
 import pytest
 
 from otel_observability.config import TelemetryConfig
+import otel_observability.logging
 import otel_observability.tracer
 from otel_observability.tracer import (
     get_current_span,
@@ -122,6 +124,50 @@ class TestInitTelemetry:
             mock_exporter.assert_called_once()
             call_kwargs = mock_exporter.call_args[1]
             assert call_kwargs["endpoint"] == "http://traces-only:4318"
+
+
+@pytest.mark.unit
+class TestExportTimeout:
+    """Teto de timeout no exporter — protege o flush de Lambda contra backend OTLP fora."""
+
+    def test_export_timeout_chega_no_exporter(
+        self, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """OTEL_EXPORTER_OTLP_TIMEOUT chega no OTLPSpanExporter de traces."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "svc")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://x:4318/v1/traces")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "2")
+
+        init_telemetry()
+
+        active_processor = otel_observability.tracer._tracer_provider._active_span_processor
+        exportador = active_processor._span_processors[0].span_exporter
+        assert exportador._timeout == 2
+
+    def test_export_timeout_chega_no_log_exporter(
+        self, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """OTEL_EXPORTER_OTLP_TIMEOUT chega no OTLPLogExporter de logs."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "svc")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://x:4318/v1/logs")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "2")
+
+        raiz = logging.getLogger()
+        handlers_antes = list(raiz.handlers)
+        try:
+            init_telemetry()
+        finally:
+            for handler in list(raiz.handlers):
+                if handler not in handlers_antes:
+                    raiz.removeHandler(handler)
+
+        processadores = otel_observability.logging._logger_provider._multi_log_record_processor._log_record_processors
+        exportador = processadores[-1]._batch_processor._exporter
+        assert exportador._timeout == 2
 
 
 @pytest.mark.unit
