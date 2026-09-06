@@ -2,10 +2,18 @@
 
 from unittest.mock import MagicMock, patch
 
-from opentelemetry.trace import StatusCode
+from opentelemetry.sdk.trace.sampling import Decision, ParentBased
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    SpanContext,
+    StatusCode,
+    TraceFlags,
+    set_span_in_context,
+)
 import pytest
 
 from otel_observability.config import TelemetryConfig
+import otel_observability.tracer
 from otel_observability.tracer import (
     get_current_span,
     get_current_span_id,
@@ -318,3 +326,49 @@ class TestTraceDecorator:
             mock_span.set_status.assert_called()
             calls = mock_span.set_status.call_args_list
             assert any(call[0][0].status_code == StatusCode.ERROR for call in calls)
+
+
+@pytest.mark.unit
+class TestSampler:
+    """Testes para o sampler do TracerProvider (ParentBased)."""
+
+    def test_sampler_e_parent_based(
+        self, mock_env_vars: dict, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """Sampler do provider é ParentBased, com a taxa da config no sampler raiz."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "0.1")
+
+        init_telemetry()
+
+        sampler = otel_observability.tracer._tracer_provider.sampler
+        assert isinstance(sampler, ParentBased)
+
+    def test_decisao_do_pai_e_respeitada(
+        self, mock_env_vars: dict, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """Pai amostrado força filho amostrado, mesmo com sample_rate=0.0."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "0.0")  # sozinho, descartaria tudo
+
+        init_telemetry()
+
+        parent_ctx = set_span_in_context(
+            NonRecordingSpan(
+                SpanContext(
+                    trace_id=0x1234,
+                    span_id=0x5678,
+                    is_remote=True,
+                    trace_flags=TraceFlags(TraceFlags.SAMPLED),
+                )
+            )
+        )
+
+        sampler = otel_observability.tracer._tracer_provider.sampler
+        result = sampler.should_sample(parent_ctx, 0x1234, "span-filho")
+
+        assert result.decision is not Decision.DROP

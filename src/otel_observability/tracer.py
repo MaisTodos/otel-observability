@@ -17,7 +17,7 @@ from opentelemetry.sdk.resources import (
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
@@ -59,7 +59,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
         }
     )
 
-    sampler = TraceIdRatioBased(_config.sample_rate)
+    sampler = ParentBased(root=TraceIdRatioBased(_config.sample_rate))
     _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
 
     if _config.traces_enabled and _config.otlp_traces_endpoint:
