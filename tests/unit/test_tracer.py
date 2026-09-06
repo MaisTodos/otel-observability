@@ -394,3 +394,25 @@ class TestSampler:
         result = sampler.should_sample(parent_ctx, 0x1234, "span-filho")
 
         assert result.decision is not Decision.DROP
+
+
+@pytest.mark.unit
+class TestResource:
+    """Testes para o Resource do TracerProvider."""
+
+    def test_resource_carrega_versao_real_da_lib(
+        self, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """telemetry.sdk.version vem do importlib.metadata (tag real), não de um literal."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+
+        init_telemetry()
+
+        from otel_observability import __version__
+
+        resource = otel_observability.tracer._tracer_provider.resource
+        assert resource.attributes["telemetry.sdk.version"] == __version__
+        assert resource.attributes["telemetry.sdk.version"] != "0.1.0"

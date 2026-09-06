@@ -864,7 +864,7 @@ wheels = [
 
 [[package]]
 name = "otel-observability"
-version = "0.1.0"
+version = "0.0.11"
 source = { editable = "." }
 dependencies = [
     { name = "opentelemetry-api" },

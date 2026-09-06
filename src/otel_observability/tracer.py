@@ -49,6 +49,9 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     _config = config or TelemetryConfig.from_env()
 
+    # Import tardio: __init__.py importa deste módulo — no topo criaria ciclo.
+    from . import __version__
+
     resource = Resource.create(
         {
             SERVICE_NAME: _config.service_name,
@@ -56,7 +59,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
             DEPLOYMENT_ENVIRONMENT: _config.environment,
             "runtime": "lambda" if _config.is_lambda else "container",
             "telemetry.sdk.name": "otel-observability",
-            "telemetry.sdk.version": "0.1.0",
+            "telemetry.sdk.version": __version__,
         }
     )
 

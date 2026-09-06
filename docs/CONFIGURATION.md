@@ -32,7 +32,7 @@ OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=<endpoint>
 
 ```bash
 OTEL_SERVICE_VERSION=1.0.0          # Versão do serviço (default: 0.0.0)
-OTEL_TRACES_SAMPLER_ARG=1.0         # Taxa de sampling, 0.0 a 1.0 (default: 1.0)
+OTEL_TRACES_SAMPLER_ARG=1.0         # Taxa de sampling, 0.0 a 1.0 (default: 1.0); aplicada a spans raiz — decisão do pai é respeitada (ParentBased)
 OTEL_TRACES_ENABLED=true            # Forçar desabilitar traces (default: true se endpoint disponível)
 OTEL_LOG_LEVEL=INFO                 # DEBUG, INFO, WARNING, ERROR
 OTEL_CONSOLE_EXPORT=false           # Exportar spans para console (debug local)

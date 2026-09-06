@@ -59,6 +59,9 @@ Example (Manual Tracing):
     ...     return {"status": "success"}
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _metadata_version
+
 # AWS Lambda integration (module always exists, no optional deps)
 from .aws_lambda import instrument_lambda_handler
 from .config import OTEL_ENV_KEYS, TelemetryConfig, seed_otel_env
@@ -115,7 +118,10 @@ except ImportError:
     track_funnel_step = None
     flush = None
 
-__version__ = "0.1.0"
+try:
+    __version__ = _metadata_version("otel-observability")
+except PackageNotFoundError:  # pragma: no cover - só ocorre fora de instalação
+    __version__ = "0.0.0"
 
 __all__ = [
     "DEFAULT_SENSITIVE_KEYS",

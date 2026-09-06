@@ -254,3 +254,16 @@ class TestSeedOtelEnv:
         with patch.dict(os.environ, {}, clear=True):
             seed_otel_env({"OTEL_SERVICE_NAME": "from-source"}, OTEL_SERVICE_NAME="override")
             assert os.environ["OTEL_SERVICE_NAME"] == "override"
+
+
+@pytest.mark.unit
+def test_versao_do_pacote_bate_com_pyproject():
+    """__version__ do pacote é a mesma versão declarada no pyproject.toml."""
+    from pathlib import Path
+
+    import tomllib
+
+    from otel_observability import __version__
+
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())
+    assert __version__ == pyproject["project"]["version"]
