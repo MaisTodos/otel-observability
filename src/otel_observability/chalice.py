@@ -45,7 +45,7 @@ def instrument_chalice(
     - Captura de erros e exceções
     - Atributos semânticos HTTP (método, status, URL, etc.)
 
-    Para eventos SQS, use o decorator trace_sqs_message() junto com @app.on_sqs_message().
+    Para eventos SQS, use o decorator trace_sqs_message (nu, sem parênteses) junto com @app.on_sqs_message().
 
     Args:
         app: Instância do Chalice.
@@ -193,7 +193,7 @@ def trace_sqs_message(func: Callable) -> Callable:
         >>> app = Chalice(app_name='myapp')
         >>>
         >>> @app.on_sqs_message(queue_name='my-queue')
-        >>> @trace_sqs_message()
+        >>> @trace_sqs_message
         >>> def process_message(event):
         ...     # event contém a mensagem SQS
         ...     message_id = event.get('messageId')

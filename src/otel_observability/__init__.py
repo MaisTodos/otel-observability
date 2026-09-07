@@ -43,7 +43,7 @@ Example (Chalice):
     ...     return {"user_id": user_id}
     >>>
     >>> @app.on_sqs_message(queue_name='my-queue')
-    >>> @trace_sqs_message()
+    >>> @trace_sqs_message
     >>> def process_message(event):
     ...     return {"status": "processed"}
 

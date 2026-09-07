@@ -1,5 +1,33 @@
 # Changelog
 
+## [Doc + endpoint] — Endpoint genérico completa o path por sinal, gate de cobertura ativo e documentação consolidada
+
+### Contexto
+
+Dois achados que apareceram depois da entrada abaixo, na revisão da própria PR: a resolução de endpoint OTLP quebrava o cenário de Agent sidecar, e a documentação do repo descrevia comportamento que o código não tem.
+
+### BREAKING
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (genérico) passa a receber o path do sinal. Antes o valor era repassado literalmente aos exporters, então `http://localhost:4318` fazia traces **e** logs postarem na raiz — exatamente o que a doc antiga recomendava para Agent sidecar, e que nunca funcionou. Agora o genérico resolve para `/v1/traces`, `/v1/metrics` e `/v1/logs`; a env específica por sinal (`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` etc.) continua sendo usada literalmente, sem sufixo. Quem já apontava o genérico para uma URL com path completo deve migrar para a env específica.
+
+### Mudanças
+
+#### `config.py`
+
+- `_resolve_signal_endpoint` centraliza a precedência específico > genérico + path > `None`.
+
+#### `pyproject.toml`
+
+- `--cov=otel_observability` entra no `addopts`. O `--cov-fail-under=80` já existia, mas sem o `--cov=` o gate nunca era aplicado localmente: `make test` passava com qualquer cobertura. Cobertura real medida: 89,87%.
+
+#### Documentação
+
+- 18 arquivos em `docs/` viram 5 + `README.md` + `CLAUDE.md`. Uma auditoria contra o código encontrou ~44 afirmações erradas, 10 delas do tipo que faz alguém configurar produção errado — a mais grave dizia que a lib detecta Lambda e envia para `localhost:4318` sozinha (não detecta; sem env, traces ficam desabilitados).
+- Estrutura nova: `CONFIGURATION.md` (env vars, precedência, campos mortos, cenários por plataforma), `USAGE.md` (a API que os serviços chamam, incluindo `RequestLoggingMiddleware` e redação de PII), `ENTRYPOINTS.md` (Lambda e Chalice), `TROUBLESHOOTING.md`, `CHANGELOG.md`.
+- `@trace_sqs_message` é decorator nu. Estava documentado com parênteses em 6 lugares, inclusive nas docstrings de `chalice.py` e `__init__.py` — com parênteses levanta `TypeError`.
+- Instalação é `git+ssh`, não PyPI. A lib não está publicada.
+- A análise de arquitetura de fevereiro saiu do repo e foi arquivada fora dele; era registro histórico, não referência de uso.
+
 ## [CNT-3620] — Flush em Lambda/Chalice, teto de export, propagação e `OTEL_LOG_FORMAT` funcionando
 
 ### Contexto
