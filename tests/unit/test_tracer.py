@@ -1,11 +1,23 @@
 """Testes unitários para o módulo tracer."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
-from opentelemetry.trace import StatusCode
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.sampling import Decision, ParentBased
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    SpanContext,
+    StatusCode,
+    TraceFlags,
+    set_span_in_context,
+    set_tracer_provider,
+)
 import pytest
 
 from otel_observability.config import TelemetryConfig
+import otel_observability.logging
+import otel_observability.tracer
 from otel_observability.tracer import (
     get_current_span,
     get_current_span_id,
@@ -115,6 +127,50 @@ class TestInitTelemetry:
 
 
 @pytest.mark.unit
+class TestExportTimeout:
+    """Teto de timeout no exporter — protege o flush de Lambda contra backend OTLP fora."""
+
+    def test_export_timeout_chega_no_exporter(
+        self, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """OTEL_EXPORTER_OTLP_TIMEOUT chega no OTLPSpanExporter de traces."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "svc")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://x:4318/v1/traces")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "2")
+
+        init_telemetry()
+
+        active_processor = otel_observability.tracer._tracer_provider._active_span_processor
+        exportador = active_processor._span_processors[0].span_exporter
+        assert exportador._timeout == 2
+
+    def test_export_timeout_chega_no_log_exporter(
+        self, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """OTEL_EXPORTER_OTLP_TIMEOUT chega no OTLPLogExporter de logs."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "svc")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://x:4318/v1/logs")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "2")
+
+        raiz = logging.getLogger()
+        handlers_antes = list(raiz.handlers)
+        try:
+            init_telemetry()
+        finally:
+            for handler in list(raiz.handlers):
+                if handler not in handlers_antes:
+                    raiz.removeHandler(handler)
+
+        processadores = otel_observability.logging._logger_provider._multi_log_record_processor._log_record_processors
+        exportador = processadores[-1]._batch_processor._exporter
+        assert exportador._timeout == 2
+
+
+@pytest.mark.unit
 class TestShutdownTelemetry:
     """Testes para shutdown_telemetry."""
 
@@ -158,6 +214,26 @@ class TestGetTracer:
 
             assert tracer == mock_tracer
             mock_trace_module.get_tracer.assert_called_once_with("test.module")
+
+    def test_get_tracer_sem_nome_resolve_modulo_chamador(self, reset_telemetry):
+        """Tracer sem nome resolve o __name__ do módulo chamador."""
+        # Provider real global: sem ele trace_api.get_tracer devolve ProxyTracer,
+        # que não expõe _instrumentation_scope.
+        set_tracer_provider(TracerProvider())
+
+        tracer = get_tracer()
+
+        # O tracer do SDK expõe o InstrumentationScope em _instrumentation_scope
+        assert tracer._instrumentation_scope.name == __name__
+        assert tracer._instrumentation_scope.name != "otel_observability.tracer"
+
+    def test_get_tracer_com_nome_explicito_e_respeitado(self, reset_telemetry):
+        """Tracer com nome explícito respeita o argumento."""
+        set_tracer_provider(TracerProvider())
+
+        tracer = get_tracer("meu.modulo")
+
+        assert tracer._instrumentation_scope.name == "meu.modulo"
 
 
 @pytest.mark.unit
@@ -318,3 +394,71 @@ class TestTraceDecorator:
             mock_span.set_status.assert_called()
             calls = mock_span.set_status.call_args_list
             assert any(call[0][0].status_code == StatusCode.ERROR for call in calls)
+
+
+@pytest.mark.unit
+class TestSampler:
+    """Testes para o sampler do TracerProvider (ParentBased)."""
+
+    def test_sampler_e_parent_based(
+        self, mock_env_vars: dict, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """Sampler do provider é ParentBased, com a taxa da config no sampler raiz."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "0.1")
+
+        init_telemetry()
+
+        sampler = otel_observability.tracer._tracer_provider.sampler
+        assert isinstance(sampler, ParentBased)
+
+    def test_decisao_do_pai_e_respeitada(
+        self, mock_env_vars: dict, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """Pai amostrado força filho amostrado, mesmo com sample_rate=0.0."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "0.0")  # sozinho, descartaria tudo
+
+        init_telemetry()
+
+        parent_ctx = set_span_in_context(
+            NonRecordingSpan(
+                SpanContext(
+                    trace_id=0x1234,
+                    span_id=0x5678,
+                    is_remote=True,
+                    trace_flags=TraceFlags(TraceFlags.SAMPLED),
+                )
+            )
+        )
+
+        sampler = otel_observability.tracer._tracer_provider.sampler
+        result = sampler.should_sample(parent_ctx, 0x1234, "span-filho")
+
+        assert result.decision is not Decision.DROP
+
+
+@pytest.mark.unit
+class TestResource:
+    """Testes para o Resource do TracerProvider."""
+
+    def test_resource_carrega_versao_real_da_lib(
+        self, monkeypatch: pytest.MonkeyPatch, reset_telemetry
+    ):
+        """telemetry.sdk.version vem do importlib.metadata (tag real), não de um literal."""
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+
+        init_telemetry()
+
+        from otel_observability import __version__
+
+        resource = otel_observability.tracer._tracer_provider.resource
+        assert resource.attributes["telemetry.sdk.version"] == __version__
+        assert resource.attributes["telemetry.sdk.version"] != "0.1.0"

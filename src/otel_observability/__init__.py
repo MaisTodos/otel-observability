@@ -43,7 +43,7 @@ Example (Chalice):
     ...     return {"user_id": user_id}
     >>>
     >>> @app.on_sqs_message(queue_name='my-queue')
-    >>> @trace_sqs_message()
+    >>> @trace_sqs_message
     >>> def process_message(event):
     ...     return {"status": "processed"}
 
@@ -59,6 +59,9 @@ Example (Manual Tracing):
     ...     return {"status": "success"}
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _metadata_version
+
 # AWS Lambda integration (module always exists, no optional deps)
 from .aws_lambda import instrument_lambda_handler
 from .config import OTEL_ENV_KEYS, TelemetryConfig, seed_otel_env
@@ -66,15 +69,19 @@ from .config import OTEL_ENV_KEYS, TelemetryConfig, seed_otel_env
 # FastAPI integration (module always exists, but may raise ImportError if deps missing)
 from .fastapi import RequestLoggingMiddleware, instrument_fastapi
 from .logging import (
-    DEFAULT_SENSITIVE_KEYS,
+    CONTA_DIGITAL_MASK_POLICY,
+    DEFAULT_MASK_POLICY,
+    Mask,
     RedactionFilter,
     clear_log_context,
     configure_logging,
     get_log_context,
     get_logger,
+    mask_document,
     set_log_context,
 )
 from .tracer import (
+    flush_telemetry,
     get_current_span,
     get_current_span_id,
     get_current_trace_id,
@@ -115,16 +122,22 @@ except ImportError:
     track_funnel_step = None
     flush = None
 
-__version__ = "0.1.0"
+try:
+    __version__ = _metadata_version("otel-observability")
+except PackageNotFoundError:  # pragma: no cover - só ocorre fora de instalação
+    __version__ = "0.0.0"
 
 __all__ = [
-    "DEFAULT_SENSITIVE_KEYS",
+    "CONTA_DIGITAL_MASK_POLICY",
+    "DEFAULT_MASK_POLICY",
     "OTEL_ENV_KEYS",
+    "Mask",
     "RedactionFilter",
     "RequestLoggingMiddleware",
     "TelemetryConfig",
     "clear_log_context",
     "configure_logging",
+    "flush_telemetry",
     "get_current_span",
     "get_current_span_id",
     "get_current_trace_id",
@@ -134,6 +147,7 @@ __all__ = [
     "init_telemetry",
     "instrument_fastapi",
     "instrument_lambda_handler",
+    "mask_document",
     "seed_otel_env",
     "set_log_context",
     "shutdown_telemetry",

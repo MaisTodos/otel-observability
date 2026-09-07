@@ -30,9 +30,14 @@ Consumidores da lib não devem adicionar handlers ao root logger manualmente.
 
 O `OTLPLogExporter` só é registrado se `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` estiver definido. Sem essa env, logs só vão para stdout.
 
-### `json_logs=False` por padrão em `instrument_fastapi()`
+### Formato de log: `OTEL_LOG_FORMAT` > default do entrypoint
 
-O formato JSON só é ativado se o chamador passar `json_logs=True`. Em `banking.back-office`, isso é controlado por `OTEL_LOG_FORMAT=json`. Produção deve sempre ter essa env configurada.
+`OTEL_LOG_FORMAT=json` liga o formato JSON em qualquer entrypoint. O parâmetro
+explícito `json_logs=` na chamada vence a env. Sem nenhum dos dois, o default é
+`False` em `instrument_fastapi()` e `True` em Lambda/Chalice.
+
+Produção deve sempre ter `OTEL_LOG_FORMAT=json` — sem log estruturado, o Datadog
+não facetiza por atributo e a busca vira texto corrido.
 
 ### `get_logger(name)` retorna `logging.getLogger(name)`
 

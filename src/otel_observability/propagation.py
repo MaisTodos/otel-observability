@@ -38,6 +38,9 @@ def inject_context_into_sqs_message_attributes() -> dict[str, dict[str, str]]:
     """
     Injeta trace context em SQS messageAttributes.
 
+    Nota: consome até 3 dos 10 MessageAttributes disponíveis na mensagem SQS
+    (traceparent, tracestate, baggage).
+
     Returns:
         Dict no formato SQS MessageAttributes.
 
@@ -53,25 +56,12 @@ def inject_context_into_sqs_message_attributes() -> dict[str, dict[str, str]]:
         ...     MessageAttributes=inject_context_into_sqs_message_attributes()
         ... )
     """
-    carrier = {}
+    carrier: dict[str, str] = {}
     inject(carrier)
 
-    # Converter para formato SQS
-    message_attributes = {}
-
-    if "traceparent" in carrier:
-        message_attributes["traceparent"] = {
-            "StringValue": carrier["traceparent"],
-            "DataType": "String",
-        }
-
-    if carrier.get("tracestate"):
-        message_attributes["tracestate"] = {
-            "StringValue": carrier["tracestate"],
-            "DataType": "String",
-        }
-
-    return message_attributes
+    return {
+        key: {"StringValue": value, "DataType": "String"} for key, value in carrier.items() if value
+    }
 
 
 def inject_context_into_sns_message_attributes() -> dict[str, dict[str, str]]:
@@ -237,16 +227,24 @@ def extract_context_from_sqs_message(message: dict[str, Any]):
     """
     carrier = {}
 
-    if "messageAttributes" in message:
-        attrs = message["messageAttributes"]
+    for key, attr in (message.get("messageAttributes") or {}).items():
+        value = attr.get("stringValue") if isinstance(attr, dict) else None
+        if value:
+            carrier[key] = value
 
-        if "traceparent" in attrs:
-            carrier["traceparent"] = attrs["traceparent"].get("stringValue", "")
-
-        if "tracestate" in attrs:
-            carrier["tracestate"] = attrs["tracestate"].get("stringValue", "")
-
-    return extract(carrier) if carrier else context.get_current()
+    # Carrier sem contexto W3C (traceparent/baggage) nao carrega trace: o
+    # propagador devolveria um Context() novo e o span perderia o pai. Atributo
+    # de negocio no carrier nao pode disparar extract. Baggage entra no gate
+    # porque produtor nao-instrumentado gera carrier so de baggage (round-trip
+    # do plano 04) — so traceparent no gate mataria o baggage desses carriers.
+    atual = context.get_current()
+    if "traceparent" in carrier or "baggage" in carrier:
+        # context= explicito faz o propagador COMPOR sobre o contexto atual em vez
+        # de criar um Context() novo. Sem isso, carrier so com baggage (produtor
+        # que propaga baggage mas cujo span nao foi amostrado) preservava o
+        # baggage e perdia o pai.
+        return extract(carrier, context=atual)
+    return atual
 
 
 def extract_context_from_sns_message(record: dict[str, Any]):
@@ -274,16 +272,25 @@ def extract_context_from_sns_message(record: dict[str, Any]):
     """
     carrier = {}
 
-    if "Sns" in record and "MessageAttributes" in record["Sns"]:
-        attrs = record["Sns"]["MessageAttributes"]
+    sns_attrs = (record.get("Sns") or {}).get("MessageAttributes") or {}
+    for key, attr in sns_attrs.items():
+        value = attr.get("Value") if isinstance(attr, dict) else None
+        if value:
+            carrier[key] = value
 
-        if "traceparent" in attrs:
-            carrier["traceparent"] = attrs["traceparent"].get("Value", "")
-
-        if "tracestate" in attrs:
-            carrier["tracestate"] = attrs["tracestate"].get("Value", "")
-
-    return extract(carrier) if carrier else context.get_current()
+    # Carrier sem contexto W3C (traceparent/baggage) nao carrega trace: o
+    # propagador devolveria um Context() novo e o span perderia o pai. Atributo
+    # de negocio no carrier nao pode disparar extract. Baggage entra no gate
+    # porque produtor nao-instrumentado gera carrier so de baggage (round-trip
+    # do plano 04) — so traceparent no gate mataria o baggage desses carriers.
+    atual = context.get_current()
+    if "traceparent" in carrier or "baggage" in carrier:
+        # context= explicito faz o propagador COMPOR sobre o contexto atual em vez
+        # de criar um Context() novo. Sem isso, carrier so com baggage (produtor
+        # que propaga baggage mas cujo span nao foi amostrado) preservava o
+        # baggage e perdia o pai.
+        return extract(carrier, context=atual)
+    return atual
 
 
 def extract_context_from_eventbridge_detail(detail: dict[str, Any]):

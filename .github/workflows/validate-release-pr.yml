@@ -21,3 +21,16 @@ jobs:
             exit 1
           fi
           echo "✅ Título '$TITLE' válido."
+
+      - uses: actions/checkout@v4
+
+      - name: Check PR title matches pyproject version
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          PYPROJECT_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          if [[ "$TITLE" != "v$PYPROJECT_VERSION" ]]; then
+            echo "❌ Título da PR ('$TITLE') não bate com pyproject.toml ('$PYPROJECT_VERSION')."
+            echo "Atualize a versão no pyproject.toml na própria release PR."
+            exit 1
+          fi
+          echo "✅ Título e pyproject.toml sincronizados em $PYPROJECT_VERSION."

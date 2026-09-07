@@ -1,6 +1,6 @@
 """AWS Lambda integration with distributed tracing."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import wraps
 import logging
 import os
@@ -13,7 +13,10 @@ from opentelemetry.trace import Status, StatusCode
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import configure_logging
-from .tracer import get_tracer, init_telemetry, shutdown_telemetry
+
+# shutdown_telemetry segue importado como ponto de patch dos testes e da API
+# pública do wrapper — o finally passou a chamar flush_telemetry (container warm).
+from .tracer import flush_telemetry, get_tracer, init_telemetry, shutdown_telemetry  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +26,11 @@ _instrumented = False
 def instrument_lambda_handler(
     config: TelemetryConfig | None = None,
     configure_logs: bool = True,
-    json_logs: bool = True,
+    json_logs: bool | None = None,
     auto_extract_context: bool = True,
     auto_instrument_libs: bool = True,
+    redact_keys: Iterable[str] | None = None,
+    mask_policy: dict | None = None,
 ):
     """
     Decorator para instrumentar AWS Lambda handler com tracing distribuído.
@@ -37,10 +42,21 @@ def instrument_lambda_handler(
     Args:
         config: Configuração customizada. Se None, carrega de variáveis de ambiente.
         configure_logs: Se True, configura logging com correlação de traces.
-        json_logs: Se True, usa formato JSON para logs.
+        json_logs: Formato JSON dos logs, resolvido por precedência: parâmetro
+            explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
+            do entrypoint (True aqui).
         auto_extract_context: Se True, extrai automaticamente trace context de eventos
                              SQS/SNS/EventBridge/API Gateway para tracing distribuído.
         auto_instrument_libs: Se True, auto-instrumenta bibliotecas comuns (boto3, httpx, etc.)
+        redact_keys: Chaves extras cujos valores são mascarados nos logs, além
+            das chaves padrão de credencial.
+        mask_policy: Mapa campo -> Mask estendendo DEFAULT_MASK_POLICY (o default
+            universal sempre entra; o que passar aqui faz merge por cima e pode
+            sobrescrever um default). Exemplo:
+            >>> from otel_observability import CONTA_DIGITAL_MASK_POLICY, Mask
+            >>> instrument_lambda_handler(
+            ...     mask_policy={**CONTA_DIGITAL_MASK_POLICY, "xpto": Mask.LAST4}
+            ... )
 
     Example:
         >>> from otel_observability.aws_lambda import instrument_lambda_handler
@@ -61,12 +77,22 @@ def instrument_lambda_handler(
 
         # Inicialização única (cold start)
         if not _instrumented:
-            # Inicializar telemetria
             cfg = config or TelemetryConfig.from_env()
-            init_telemetry(cfg)
 
+            # configure_logging must run BEFORE init_telemetry: init_telemetry calls
+            # init_otlp_log_export which adds the LoggingHandler to the root logger.
+            # If configure_logging runs after, its handlers.clear() removes that handler
+            # and logs never reach Datadog.
             if configure_logs:
-                configure_logging(level=cfg.log_level, json_format=json_logs)
+                configure_logging(
+                    level=cfg.log_level,
+                    json_format=cfg.resolve_json_logs(json_logs, default=True),
+                    redact_keys=redact_keys,
+                    mask_policy=mask_policy,
+                )
+
+            # Inicializar telemetria
+            init_telemetry(cfg)
 
             if auto_instrument_libs:
                 auto_instrument()
@@ -117,7 +143,7 @@ def instrument_lambda_handler(
                         raise
             finally:
                 otel_context.detach(token)
-                shutdown_telemetry(timeout=5)
+                flush_telemetry(timeout=5)
 
         return wrapper
 

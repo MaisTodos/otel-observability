@@ -2,6 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
+from opentelemetry import baggage, trace
+from opentelemetry import context as otel_context
+from opentelemetry.sdk.trace import TracerProvider
 import pytest
 
 from otel_observability.propagation import (
@@ -333,3 +336,96 @@ class TestAttachContext:
 
             assert result == mock_token
             mock_attach.assert_called_once_with(mock_parent_context)
+
+
+def attrs_to_lambda_shape(attrs: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Converte MessageAttributes do formato boto3 (StringValue) para o formato do evento Lambda (stringValue)."""
+    return {key: {"stringValue": attr["StringValue"]} for key, attr in attrs.items()}
+
+
+def attrs_to_sns_shape(attrs: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Converte MessageAttributes do formato boto3 (StringValue) para o formato do evento SNS (Value)."""
+    return {key: {"Value": attr["StringValue"], "Type": "String"} for key, attr in attrs.items()}
+
+
+@pytest.mark.unit
+class TestBaggageRoundTrip:
+    """Testes de round-trip real de baggage (sem mock de inject/extract)."""
+
+    def test_baggage_sobrevive_round_trip_sqs(self):
+        """Baggage sobrevive ao round-trip SQS (inject → messageAttributes → extract)."""
+        ctx = baggage.set_baggage("journey", "pix_cash_out")
+        token = otel_context.attach(ctx)
+        try:
+            attrs = inject_context_into_sqs_message_attributes()
+        finally:
+            otel_context.detach(token)
+
+        assert "baggage" in attrs
+
+        recovered = extract_context_from_sqs_message(
+            {"messageAttributes": attrs_to_lambda_shape(attrs)}
+        )
+        assert baggage.get_baggage("journey", recovered) == "pix_cash_out"
+
+    def test_baggage_sobrevive_round_trip_sns(self):
+        """Baggage sobrevive ao round-trip SNS (inject → MessageAttributes → extract)."""
+        ctx = baggage.set_baggage("journey", "pix_cash_out")
+        token = otel_context.attach(ctx)
+        try:
+            attrs = inject_context_into_sns_message_attributes()
+        finally:
+            otel_context.detach(token)
+
+        assert "baggage" in attrs
+
+        record = {"Sns": {"MessageAttributes": attrs_to_sns_shape(attrs)}}
+        recovered = extract_context_from_sns_message(record)
+        assert baggage.get_baggage("journey", recovered) == "pix_cash_out"
+
+
+@pytest.mark.unit
+def test_carrier_sem_traceparent_preserva_contexto_do_pai():
+    """Produtor nao-instrumentado manda so atributo de negocio. O carrier fica
+    nao-vazio, mas sem traceparent — extract() devolveria contexto novo e
+    quebraria a correlacao com o pai."""
+    mensagem = {"messageAttributes": {"pedido_id": {"stringValue": "123"}}}
+
+    # Provider local: com o global da API (ProxyTracer) o span pai teria
+    # trace_id 0 e a asserção passaria vacuamente mesmo com o bug.
+    tracer = TracerProvider().get_tracer(__name__)
+    with tracer.start_as_current_span("pai") as pai:
+        ctx = extract_context_from_sqs_message(mensagem)
+        recuperado = trace.get_current_span(ctx).get_span_context()
+
+        assert recuperado.trace_id == pai.get_span_context().trace_id
+
+
+@pytest.mark.unit
+def test_carrier_sns_sem_traceparent_preserva_contexto_do_pai():
+    """Espelho SQS→SNS: MessageAttributes de negocio sem traceparent nao pode
+    orfanar o span pai."""
+    record = {"Sns": {"MessageAttributes": {"pedido_id": {"Value": "123"}}}}
+
+    tracer = TracerProvider().get_tracer(__name__)
+    with tracer.start_as_current_span("pai") as pai:
+        ctx = extract_context_from_sns_message(record)
+        recuperado = trace.get_current_span(ctx).get_span_context()
+
+        assert recuperado.trace_id == pai.get_span_context().trace_id
+
+
+@pytest.mark.unit
+def test_carrier_com_traceparent_ainda_extrai():
+    """Carrier com traceparent continua extraindo o contexto remoto — sem
+    regressao do plano 04 (is_remote distingue extract real de passthrough)."""
+    tracer = TracerProvider().get_tracer(__name__)
+    with tracer.start_as_current_span("pai") as pai:
+        attrs = inject_context_into_sqs_message_attributes()
+        mensagem = {"messageAttributes": attrs_to_lambda_shape(attrs)}
+
+        ctx = extract_context_from_sqs_message(mensagem)
+        recuperado = trace.get_current_span(ctx).get_span_context()
+
+        assert recuperado.trace_id == pai.get_span_context().trace_id
+        assert recuperado.is_remote is True

@@ -4,7 +4,7 @@ import os
 import socket
 import threading
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -107,10 +107,9 @@ class TestMetricsIntegration:
 class TestTagApplication:
     """Test automatic tag application."""
 
-    @patch("otel_observability.metrics._get_statsd_client")
     @patch("otel_observability.config.TelemetryConfig")
-    def test_unified_tags_applied(self, mock_config_class, mock_get_client, reset_metrics_module):
-        """Test that unified tags are automatically applied."""
+    def test_unified_tags_applied(self, mock_config_class, reset_metrics_module):
+        """Test that unified tags are automatically applied via constant_tags."""
         # Setup mock config
         mock_config = type("Config", (), {})()
         mock_config.dogstatsd_enabled = True
@@ -121,26 +120,23 @@ class TestTagApplication:
         mock_config.service_version = "1.2.3"
         mock_config_class.from_env.return_value = mock_config
 
-        # Setup mock client
-        mock_client = type("Client", (), {})()
-        call_args_list = []
+        # Reset client
+        metrics._statsd_client = None
 
-        def mock_increment(*args, **kwargs):
-            call_args_list.append(kwargs)
+        # Create client through the real initialization path with mocked DogStatsd
+        mock_dogstatsd_class = MagicMock()
+        mock_datadog_module = MagicMock()
+        mock_datadog_module.DogStatsd = mock_dogstatsd_class
 
-        mock_client.increment = mock_increment
-        mock_get_client.return_value = mock_client
+        with patch.dict("sys.modules", {"datadog": mock_datadog_module}):
+            metrics._get_statsd_client()
 
-        # Send metric
-        metrics.increment_counter("test.metric", tags=["custom:tag"])
-
-        # Verify unified tags are included
-        assert len(call_args_list) > 0
-        tags = call_args_list[0]["tags"]
-        assert "env:production" in tags
-        assert "service:my-service" in tags
-        assert "version:1.2.3" in tags
-        assert "custom:tag" in tags
+        # Verify unified tags are applied as constant_tags
+        _, kwargs = mock_dogstatsd_class.call_args
+        constant_tags = " ".join(kwargs["constant_tags"])
+        assert "env:production" in constant_tags
+        assert "service:my-service" in constant_tags
+        assert "version:1.2.3" in constant_tags
 
 
 class TestErrorHandling:

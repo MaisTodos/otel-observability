@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from functools import wraps
+import inspect
 import logging
 from typing import Any
 
@@ -17,7 +18,7 @@ from opentelemetry.sdk.resources import (
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
@@ -48,6 +49,9 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     _config = config or TelemetryConfig.from_env()
 
+    # Import tardio: __init__.py importa deste módulo — no topo criaria ciclo.
+    from . import __version__
+
     resource = Resource.create(
         {
             SERVICE_NAME: _config.service_name,
@@ -55,17 +59,18 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
             DEPLOYMENT_ENVIRONMENT: _config.environment,
             "runtime": "lambda" if _config.is_lambda else "container",
             "telemetry.sdk.name": "otel-observability",
-            "telemetry.sdk.version": "0.1.0",
+            "telemetry.sdk.version": __version__,
         }
     )
 
-    sampler = TraceIdRatioBased(_config.sample_rate)
+    sampler = ParentBased(root=TraceIdRatioBased(_config.sample_rate))
     _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
 
     if _config.traces_enabled and _config.otlp_traces_endpoint:
         otlp_exporter = OTLPSpanExporter(
             endpoint=_config.otlp_traces_endpoint.strip(),
             headers=_config.otlp_headers or {},
+            timeout=_config.export_timeout,
         )
         _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
     else:
@@ -124,21 +129,41 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         logger.info("Telemetry shutdown complete")
 
 
-def get_tracer(name: str = __name__) -> trace_api.Tracer:
+def flush_telemetry(timeout: int = 5) -> None:
+    """Forca o envio do que esta em buffer, SEM desligar o provider.
+
+    Lambda reaproveita container: chamar shutdown a cada invocacao deixa o
+    BatchSpanProcessor morto da 2a em diante. Flush esvazia o buffer e mantem
+    o provider utilizavel.
+    """
+    from .logging import flush_log_export
+
+    flush_log_export(timeout=timeout)
+
+    if _tracer_provider:
+        _tracer_provider.force_flush(timeout_millis=timeout * 1000)
+
+
+def get_tracer(name: str | None = None) -> trace_api.Tracer:
     """
     Get a tracer instance.
 
     Args:
-        name: Tracer name (usually __name__ of the module).
+        name: Tracer name. Se omitido, resolve o __name__ do módulo chamador.
 
     Returns:
         Tracer instance.
 
     Example:
-        >>> tracer = get_tracer(__name__)
+        >>> tracer = get_tracer()
         >>> with tracer.start_as_current_span("my_operation"):
         ...     pass
     """
+    if name is None:
+        frame = inspect.currentframe()
+        caller = frame.f_back if frame is not None else None
+        name = caller.f_globals.get("__name__", __name__) if caller is not None else __name__
+
     return trace_api.get_tracer(name)
 
 

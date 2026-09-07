@@ -5,6 +5,26 @@ import os
 from typing import Any
 import warnings
 
+_OTLP_SIGNAL_PATHS = {"traces": "/v1/traces", "metrics": "/v1/metrics", "logs": "/v1/logs"}
+
+
+def _resolve_signal_endpoint(specific: str | None, generic: str | None, signal: str) -> str | None:
+    """Resolve o endpoint de um sinal.
+
+    Endpoint declarado por sinal vai verbatim: quem escreveu ja disse o alvo
+    final, e completar o path quebraria quem usa proxy com rota propria.
+
+    Endpoint generico e uma BASE, e ganha o path do sinal. Sem isso, os
+    exporters recebem endpoint explicito sem path e o SDK nao completa —
+    traces e logs POSTam os dois na raiz. Verificado em 06/09/2026, e o
+    que quebra a configuracao de sidecar em EKS/ECS.
+    """
+    if specific and specific.strip():
+        return specific.strip()
+    if generic and generic.strip():
+        return generic.strip().rstrip("/") + _OTLP_SIGNAL_PATHS[signal]
+    return None
+
 
 @dataclass
 class TelemetryConfig:
@@ -26,6 +46,8 @@ class TelemetryConfig:
     dogstatsd_enabled: bool
     dogstatsd_host: str
     dogstatsd_port: int
+    log_format: str | None = None
+    export_timeout: int = 3
 
     @classmethod
     def from_env(cls) -> "TelemetryConfig":
@@ -40,12 +62,16 @@ class TelemetryConfig:
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: Traces-specific endpoint (overrides base)
             OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics-specific endpoint (overrides base)
             OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: Logs-specific endpoint (enables OTLP log export)
+            OTEL_EXPORTER_OTLP_TIMEOUT: OTLP exporter timeout in seconds (default: 3). Cap do
+                retry interno do exporter — protege o flush de Lambda contra backend fora.
             OTEL_TRACES_ENABLED: Explicitly enable/disable traces exporter (default: true if endpoint available)
             OTEL_EXPORTER_OTLP_HEADERS: OTLP headers (format: key1=value1,key2=value2)
             DD_API_KEY: Datadog API key (if sending directly)
             DD_SITE: Datadog site (datadoghq.com, datadoghq.eu, etc.)
             OTEL_CONSOLE_EXPORT: Enable console exporter for debugging
             OTEL_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR)
+            OTEL_LOG_FORMAT: Log format. "json" (case-insensitive) enables JSON logs;
+                empty or other values fall back to the entrypoint default.
             OTEL_TRACES_SAMPLER_ARG: Sample rate (0.0 to 1.0, default 1.0)
             DD_DOGSTATSD_ENABLED: Enable DogStatsD metrics (default: true)
             DD_DOGSTATSD_HOST: DogStatsD host (default: localhost)
@@ -61,15 +87,15 @@ class TelemetryConfig:
         # Signal-specific endpoint resolution: signal-specific > generic > None
         generic_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 
-        otlp_traces_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or generic_endpoint or ""
-        ).strip() or None
-        otlp_metrics_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or generic_endpoint or ""
-        ).strip() or None
-        otlp_logs_endpoint = (
-            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or generic_endpoint or ""
-        ).strip() or None
+        otlp_traces_endpoint = _resolve_signal_endpoint(
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), generic_endpoint, "traces"
+        )
+        otlp_metrics_endpoint = _resolve_signal_endpoint(
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), generic_endpoint, "metrics"
+        )
+        otlp_logs_endpoint = _resolve_signal_endpoint(
+            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"), generic_endpoint, "logs"
+        )
 
         traces_enabled = (
             os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true"
@@ -104,11 +130,21 @@ class TelemetryConfig:
             is_lambda=is_lambda,
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
             log_level=os.getenv("OTEL_LOG_LEVEL", "INFO").upper(),
+            log_format=(os.getenv("OTEL_LOG_FORMAT") or None),
+            export_timeout=int(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "3")),
             sample_rate=float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")),
             dogstatsd_enabled=dogstatsd_enabled,
             dogstatsd_host=dogstatsd_host,
             dogstatsd_port=dogstatsd_port,
         )
+
+    def resolve_json_logs(self, explicit: bool | None, default: bool) -> bool:
+        """Resolve o formato de log: parâmetro explícito > OTEL_LOG_FORMAT > default."""
+        if explicit is not None:
+            return explicit
+        if self.log_format:
+            return self.log_format.strip().lower() == "json"
+        return default
 
     @staticmethod
     def _parse_headers() -> dict | None:
