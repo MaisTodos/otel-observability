@@ -50,6 +50,33 @@ class TestMetricsClient:
         assert mock_dogstatsd.call_args[1]["host"] == "localhost"
         assert mock_dogstatsd.call_args[1]["port"] == 8125
 
+    def test_cliente_criado_com_unified_tags_como_constant_tags(self, reset_metrics_module):
+        """Test client is created with unified tags as constant_tags."""
+        mock_client = Mock()
+        mock_dogstatsd = Mock(return_value=mock_client)
+        mock_datadog_module = MagicMock()
+        mock_datadog_module.DogStatsd = mock_dogstatsd
+
+        mock_config = Mock()
+        mock_config.dogstatsd_enabled = True
+        mock_config.dogstatsd_host = "localhost"
+        mock_config.dogstatsd_port = 8125
+        mock_config.environment = "test"
+        mock_config.service_name = "test-service"
+        mock_config.service_version = "1.0.0"
+
+        with (
+            patch.dict("sys.modules", {"datadog": mock_datadog_module}),
+            patch("otel_observability.config.TelemetryConfig") as mock_config_class,
+        ):
+            mock_config_class.from_env.return_value = mock_config
+            metrics._get_statsd_client()
+
+        _, kwargs = mock_dogstatsd.call_args
+        assert "env:" in " ".join(kwargs["constant_tags"])
+        assert "service:" in " ".join(kwargs["constant_tags"])
+        assert "version:" in " ".join(kwargs["constant_tags"])
+
     def test_client_disabled(self, reset_metrics_module):
         """Test client when DogStatsD is disabled."""
         mock_datadog_module = MagicMock()
@@ -199,22 +226,17 @@ class TestIncrementCounter:
         assert not hasattr(mock_get_client.return_value, "increment")
 
     @patch("otel_observability.metrics._get_statsd_client")
-    def test_increment_counter_with_unified_tags(
+    def test_increment_counter_nao_repassa_unified_tags(
         self, mock_get_client, mock_statsd_client, reset_metrics_module
     ):
-        """Test counter increment includes unified tags."""
+        """Test counter does not re-pass unified tags (they live in constant_tags)."""
         mock_get_client.return_value = mock_statsd_client
 
-        metrics.increment_counter("app.requests", tags=["region:us-east-1"])
+        metrics.increment_counter("app.teste", tags=["rota:/x"])
 
-        call_args = mock_statsd_client.increment.call_args
-        tags = call_args[1]["tags"]
-
-        # Should include unified tags
-        assert any("env:" in tag for tag in tags)
-        assert any("service:" in tag for tag in tags)
-        assert any("version:" in tag for tag in tags)
-        assert "region:us-east-1" in tags
+        _, kwargs = mock_statsd_client.increment.call_args
+        assert kwargs["tags"] == ["rota:/x"]
+        assert not any(t.startswith("env:") for t in kwargs["tags"])
 
 
 class TestSetGauge:
@@ -233,6 +255,19 @@ class TestSetGauge:
         assert call_args[0][0] == "app.active_users"
         assert call_args[1]["value"] == 150
         assert "region:us-east-1" in call_args[1]["tags"]
+
+    @patch("otel_observability.metrics._get_statsd_client")
+    def test_set_gauge_nao_repassa_unified_tags(
+        self, mock_get_client, mock_statsd_client, reset_metrics_module
+    ):
+        """Test gauge does not re-pass unified tags (they live in constant_tags)."""
+        mock_get_client.return_value = mock_statsd_client
+
+        metrics.set_gauge("app.teste", 1.0, tags=["rota:/x"])
+
+        _, kwargs = mock_statsd_client.gauge.call_args
+        assert kwargs["tags"] == ["rota:/x"]
+        assert not any(t.startswith("env:") for t in kwargs["tags"])
 
 
 class TestRecordHistogram:
@@ -254,6 +289,19 @@ class TestRecordHistogram:
         assert call_args[1]["value"] == 0.125
         assert "endpoint:/api/users" in call_args[1]["tags"]
 
+    @patch("otel_observability.metrics._get_statsd_client")
+    def test_record_histogram_nao_repassa_unified_tags(
+        self, mock_get_client, mock_statsd_client, reset_metrics_module
+    ):
+        """Test histogram does not re-pass unified tags (they live in constant_tags)."""
+        mock_get_client.return_value = mock_statsd_client
+
+        metrics.record_histogram("app.teste", 0.125, tags=["rota:/x"])
+
+        _, kwargs = mock_statsd_client.histogram.call_args
+        assert kwargs["tags"] == ["rota:/x"]
+        assert not any(t.startswith("env:") for t in kwargs["tags"])
+
 
 class TestRecordDistribution:
     """Test record_distribution function."""
@@ -273,6 +321,19 @@ class TestRecordDistribution:
         assert call_args[0][0] == "app.latency"
         assert call_args[1]["value"] == 0.125
         assert "region:us-east-1" in call_args[1]["tags"]
+
+    @patch("otel_observability.metrics._get_statsd_client")
+    def test_record_distribution_nao_repassa_unified_tags(
+        self, mock_get_client, mock_statsd_client, reset_metrics_module
+    ):
+        """Test distribution does not re-pass unified tags (they live in constant_tags)."""
+        mock_get_client.return_value = mock_statsd_client
+
+        metrics.record_distribution("app.teste", 0.125, tags=["rota:/x"])
+
+        _, kwargs = mock_statsd_client.distribution.call_args
+        assert kwargs["tags"] == ["rota:/x"]
+        assert not any(t.startswith("env:") for t in kwargs["tags"])
 
 
 class TestTrackFunnelStep:

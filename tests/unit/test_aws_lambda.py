@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from otel_observability import aws_lambda as aws_lambda_module
 from otel_observability.aws_lambda import (
     _add_event_attributes,
     _extract_carrier_from_event,
@@ -11,6 +12,30 @@ from otel_observability.aws_lambda import (
     instrument_lambda_handler,
 )
 from otel_observability.config import TelemetryConfig
+
+
+@pytest.fixture(name="reset_lambda_module")
+def _reset_lambda_module(reset_telemetry):
+    """Reseta a flag global _instrumented entre testes.
+
+    `_instrumented` é global de módulo: sem reset, o teste seguinte entra no
+    `if not _instrumented` como falso e vira no-op silencioso. Os globais de
+    tracer/logging ficam por conta do reset_telemetry (conftest), pois os
+    testes abaixo exercitam o init_telemetry real.
+    """
+    aws_lambda_module._instrumented = False
+    yield
+    aws_lambda_module._instrumented = False
+
+
+def _lambda_context() -> MagicMock:
+    """Contexto Lambda mockado, com os atributos usados pelo wrapper."""
+    context = MagicMock()
+    context.function_name = "test-function"
+    context.aws_request_id = "req-123"
+    context.function_version = "$LATEST"
+    context.memory_limit_in_mb = 512
+    return context
 
 
 @pytest.mark.unit
@@ -35,7 +60,7 @@ class TestInstrumentLambdaHandler:
             patch("opentelemetry.context.attach") as mock_attach,
             patch("opentelemetry.context.detach"),
             patch("opentelemetry.context.get_current") as mock_get_current,
-            patch("otel_observability.aws_lambda.shutdown_telemetry") as mock_shutdown,
+            patch("otel_observability.aws_lambda.flush_telemetry") as mock_flush,
         ):
             mock_tracer = MagicMock()
             mock_span = MagicMock()
@@ -53,7 +78,7 @@ class TestInstrumentLambdaHandler:
             mock_configure_logs.assert_called_once()
             mock_auto_instrument.assert_called_once()
             mock_handler.assert_called_once_with({"test": "event"}, mock_lambda_context)
-            mock_shutdown.assert_called_once()
+            mock_flush.assert_called_once()
 
     def test_instrument_lambda_handler_without_logs(self, telemetry_config: TelemetryConfig):
         """Testa instrumentação sem configurar logs."""
@@ -69,7 +94,7 @@ class TestInstrumentLambdaHandler:
             patch("opentelemetry.context.attach"),
             patch("opentelemetry.context.detach"),
             patch("opentelemetry.context.get_current"),
-            patch("otel_observability.aws_lambda.shutdown_telemetry"),
+            patch("otel_observability.aws_lambda.flush_telemetry"),
         ):
             mock_tracer = MagicMock()
             mock_span = MagicMock()
@@ -97,7 +122,7 @@ class TestInstrumentLambdaHandler:
             patch("opentelemetry.context.attach") as mock_attach,
             patch("opentelemetry.context.detach") as mock_detach,
             patch("opentelemetry.context.get_current") as mock_get_current,
-            patch("otel_observability.aws_lambda.shutdown_telemetry") as mock_shutdown,
+            patch("otel_observability.aws_lambda.flush_telemetry") as mock_flush,
             patch("otel_observability.aws_lambda.logger"),
         ):
             mock_tracer = MagicMock()
@@ -117,7 +142,55 @@ class TestInstrumentLambdaHandler:
             assert mock_span.set_status.called
             assert mock_span.record_exception.called
             mock_detach.assert_called_once_with(mock_token)
-            mock_shutdown.assert_called_once()
+            mock_flush.assert_called_once()
+
+    def test_redact_keys_chega_no_configure_logging(self, mocker, reset_lambda_module):
+        """redact_keys passado ao decorator chega ao configure_logging."""
+        spy = mocker.patch("otel_observability.aws_lambda.configure_logging")
+
+        @instrument_lambda_handler(redact_keys=["cpf_do_cliente"], auto_instrument_libs=False)
+        def handler(event, context):
+            return {}
+
+        handler({}, _lambda_context())
+
+        assert spy.call_args.kwargs["redact_keys"] == ["cpf_do_cliente"]
+
+    def test_configure_logging_roda_antes_de_init_telemetry(self, mocker, reset_lambda_module):
+        """Ordem importa: init_telemetry instala o handler OTLP e configure_logging
+        faz handlers.clear(). Invertido, o log nunca sai via OTLP."""
+        manager = mocker.MagicMock()
+        manager.attach_mock(
+            mocker.patch("otel_observability.aws_lambda.configure_logging"), "cfg_log"
+        )
+        manager.attach_mock(mocker.patch("otel_observability.aws_lambda.init_telemetry"), "init")
+
+        @instrument_lambda_handler(auto_instrument_libs=False)
+        def handler(event, context):
+            return {}
+
+        handler({}, _lambda_context())
+
+        nomes = [c[0] for c in manager.mock_calls]
+        assert nomes.index("cfg_log") < nomes.index("init")
+
+    def test_segunda_invocacao_ainda_exporta_span(self, mocker, reset_lambda_module):
+        """Container warm: shutdown a cada invocação mata a exportação da 2ª em diante."""
+        shutdown = mocker.patch("otel_observability.aws_lambda.shutdown_telemetry")
+        flush = mocker.patch("otel_observability.aws_lambda.flush_telemetry")
+        # configure_logging real instalaria handler com TraceContextFilter no root
+        # logger, vazando para os testes seguintes.
+        mocker.patch("otel_observability.aws_lambda.configure_logging")
+
+        @instrument_lambda_handler(auto_instrument_libs=False)
+        def handler(event, context):
+            return {}
+
+        handler({}, _lambda_context())
+        handler({}, _lambda_context())
+
+        assert shutdown.call_count == 0
+        assert flush.call_count == 2
 
 
 @pytest.mark.unit

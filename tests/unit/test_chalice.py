@@ -277,6 +277,77 @@ class TestInstrumentChalice:
 
             mock_span.set_attribute.assert_any_call("request.is_health_check", True)
 
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_redact_keys_chega_no_configure_logging(self, mocker, reset_telemetry):
+        """redact_keys chega ao configure_logging."""
+        spy = mocker.patch("otel_observability.chalice.configure_logging")
+        mock_app = MagicMock()
+        mock_app.app_name = "test-app"
+        mock_app.middleware = MagicMock()
+
+        instrument_chalice(mock_app, redact_keys=["cpf_do_cliente"], auto_instrument_libs=False)
+
+        assert spy.call_args.kwargs["redact_keys"] == ["cpf_do_cliente"]
+
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_configure_logging_roda_antes_de_init_telemetry(self, mocker):
+        """Ordem importa: init_telemetry instala o handler OTLP e configure_logging
+        faz handlers.clear(). Invertido, o log nunca sai via OTLP."""
+        manager = mocker.MagicMock()
+        manager.attach_mock(mocker.patch("otel_observability.chalice.configure_logging"), "cfg_log")
+        manager.attach_mock(mocker.patch("otel_observability.chalice.init_telemetry"), "init")
+        mock_app = MagicMock()
+        mock_app.app_name = "test-app"
+        mock_app.middleware = MagicMock()
+
+        instrument_chalice(mock_app, auto_instrument_libs=False)
+
+        nomes = [c[0] for c in manager.mock_calls]
+        assert nomes.index("cfg_log") < nomes.index("init")
+
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_middleware_http_faz_flush_ao_terminar(self, mocker):
+        """Mesmo problema do SQS: container congela apos a request, e sem flush
+        o buffer do BatchSpanProcessor morre cheio."""
+        flush = mocker.patch("otel_observability.chalice.flush_telemetry")
+        mock_app = MagicMock()
+        mock_app.app_name = "test-app"
+        captured_middleware = []
+
+        def fake_middleware_decorator(event_type):
+            def decorator(func):
+                captured_middleware.append(func)
+                return func
+
+            return decorator
+
+        mock_app.middleware = MagicMock(side_effect=fake_middleware_decorator)
+
+        mock_event = MagicMock()
+        mock_event.method = "GET"
+        mock_event.path = "/x"
+        mock_event.headers = {}
+
+        with (
+            patch("otel_observability.chalice.init_telemetry"),
+            patch("otel_observability.chalice.configure_logging"),
+            patch("otel_observability.chalice.auto_instrument"),
+            patch("otel_observability.chalice.get_tracer") as mock_get_tracer,
+            patch("opentelemetry.context.attach"),
+            patch("opentelemetry.context.detach"),
+            patch("opentelemetry.context.get_current"),
+        ):
+            mock_tracer = MagicMock()
+            mock_span = MagicMock()
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
+            mock_get_tracer.return_value = mock_tracer
+
+            instrument_chalice(mock_app)
+            captured_middleware[0](mock_event, MagicMock(return_value={}))
+
+        assert flush.call_count == 1
+
 
 @pytest.mark.unit
 class TestTraceSqsMessage:
@@ -403,6 +474,33 @@ class TestTraceSqsMessage:
 
             with pytest.raises(ImportError, match="Chalice not available"):
                 trace_sqs_message(mock_handler)
+
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_trace_sqs_message_faz_flush_ao_terminar(self, mocker):
+        """Container do Lambda congela apos o handler. Sem flush, o buffer do
+        BatchSpanProcessor morre cheio e a telemetria se perde."""
+        flush = mocker.patch("otel_observability.chalice.flush_telemetry")
+
+        @trace_sqs_message
+        def handler(event):
+            return {"ok": True}
+
+        handler({"messageId": "1", "body": "{}"})
+
+        assert flush.call_count == 1
+
+    @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+    def test_flush_roda_mesmo_com_excecao(self, mocker):
+        flush = mocker.patch("otel_observability.chalice.flush_telemetry")
+
+        @trace_sqs_message
+        def handler(event):
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError, match="boom"):
+            handler({"messageId": "1"})
+
+        assert flush.call_count == 1
 
 
 @pytest.mark.unit

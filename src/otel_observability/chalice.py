@@ -1,6 +1,6 @@
 """Chalice integration with automatic instrumentation and distributed tracing."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import wraps
 import logging
 from typing import Any
@@ -20,7 +20,7 @@ except ImportError:
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import configure_logging
-from .tracer import get_tracer, init_telemetry
+from .tracer import flush_telemetry, get_tracer, init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,10 @@ def instrument_chalice(
     app: Chalice,
     config: TelemetryConfig | None = None,
     configure_logs: bool = True,
-    json_logs: bool = True,
+    json_logs: bool | None = None,
     auto_instrument_libs: bool = True,
+    redact_keys: Iterable[str] | None = None,
+    mask_policy: dict | None = None,
 ):
     """
     Instrumenta aplicação Chalice com OpenTelemetry.
@@ -43,14 +45,25 @@ def instrument_chalice(
     - Captura de erros e exceções
     - Atributos semânticos HTTP (método, status, URL, etc.)
 
-    Para eventos SQS, use o decorator trace_sqs_message() junto com @app.on_sqs_message().
+    Para eventos SQS, use o decorator trace_sqs_message (nu, sem parênteses) junto com @app.on_sqs_message().
 
     Args:
         app: Instância do Chalice.
         config: Configuração customizada. Se None, carrega de variáveis de ambiente.
         configure_logs: Se True, configura logging com correlação de traces.
-        json_logs: Se True, usa formato JSON para logs (recomendado em produção).
+        json_logs: Formato JSON dos logs, resolvido por precedência: parâmetro
+            explícito True/False > OTEL_LOG_FORMAT ("json" liga JSON) > default
+            do entrypoint (True aqui).
         auto_instrument_libs: Se True, auto-instrumenta bibliotecas comuns (httpx, requests, boto3, etc.)
+        redact_keys: Chaves extras cujos valores são mascarados nos logs, além
+            das chaves padrão de credencial.
+        mask_policy: Mapa campo -> Mask estendendo DEFAULT_MASK_POLICY (o default
+            universal sempre entra; o que passar aqui faz merge por cima e pode
+            sobrescrever um default). Exemplo:
+            >>> from otel_observability import CONTA_DIGITAL_MASK_POLICY, Mask
+            >>> instrument_chalice(
+            ...     app, mask_policy={**CONTA_DIGITAL_MASK_POLICY, "xpto": Mask.LAST4}
+            ... )
 
     Raises:
         ImportError: Se chalice não estiver instalado.
@@ -87,10 +100,20 @@ def instrument_chalice(
 
     cfg = config or TelemetryConfig.from_env()
 
-    init_telemetry(cfg)
-
+    # configure_logging must run BEFORE init_telemetry: init_telemetry calls
+    # init_otlp_log_export which adds the LoggingHandler to the root logger.
+    # If configure_logging runs after, its handlers.clear() removes that handler
+    # and logs never reach Datadog.
     if configure_logs:
-        configure_logging(level=cfg.log_level, json_format=json_logs)
+        configure_logging(
+            level=cfg.log_level,
+            json_format=cfg.resolve_json_logs(json_logs, default=True),
+            redact_keys=redact_keys,
+            mask_policy=mask_policy,
+        )
+
+    # Inicializar telemetria
+    init_telemetry(cfg)
 
     if auto_instrument_libs:
         auto_instrument()
@@ -142,6 +165,7 @@ def instrument_chalice(
                     raise
         finally:
             otel_context.detach(token)
+            flush_telemetry(timeout=5)
 
     _instrumented = True
     logger.info(
@@ -169,7 +193,7 @@ def trace_sqs_message(func: Callable) -> Callable:
         >>> app = Chalice(app_name='myapp')
         >>>
         >>> @app.on_sqs_message(queue_name='my-queue')
-        >>> @trace_sqs_message()
+        >>> @trace_sqs_message
         >>> def process_message(event):
         ...     # event contém a mensagem SQS
         ...     message_id = event.get('messageId')
@@ -227,6 +251,7 @@ def trace_sqs_message(func: Callable) -> Callable:
                     raise
         finally:
             otel_context.detach(token)
+            flush_telemetry(timeout=5)
 
     return wrapper
 

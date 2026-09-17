@@ -149,9 +149,8 @@ def increment_counter(
 
     try:
         validated_tags = _validate_tags(tags)
-        all_tags = _merge_tags(_get_unified_tags(), validated_tags)
 
-        client.increment(metric_name, value=value, tags=all_tags, sample_rate=sample_rate)
+        client.increment(metric_name, value=value, tags=validated_tags, sample_rate=sample_rate)
     except Exception as e:
         logger.warning(f"Failed to send counter metric {metric_name}: {e}")
 
@@ -184,9 +183,8 @@ def set_gauge(
 
     try:
         validated_tags = _validate_tags(tags)
-        all_tags = _merge_tags(_get_unified_tags(), validated_tags)
 
-        client.gauge(metric_name, value=value, tags=all_tags)
+        client.gauge(metric_name, value=value, tags=validated_tags)
     except Exception as e:
         logger.warning(f"Failed to send gauge metric {metric_name}: {e}")
 
@@ -220,9 +218,8 @@ def record_histogram(
 
     try:
         validated_tags = _validate_tags(tags)
-        all_tags = _merge_tags(_get_unified_tags(), validated_tags)
 
-        client.histogram(metric_name, value=value, tags=all_tags, sample_rate=sample_rate)
+        client.histogram(metric_name, value=value, tags=validated_tags, sample_rate=sample_rate)
     except Exception as e:
         logger.warning(f"Failed to send histogram metric {metric_name}: {e}")
 
@@ -254,9 +251,8 @@ def record_distribution(
 
     try:
         validated_tags = _validate_tags(tags)
-        all_tags = _merge_tags(_get_unified_tags(), validated_tags)
 
-        client.distribution(metric_name, value=value, tags=all_tags)
+        client.distribution(metric_name, value=value, tags=validated_tags)
     except Exception as e:
         logger.warning(f"Failed to send distribution metric {metric_name}: {e}")
 
