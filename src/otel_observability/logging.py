@@ -206,8 +206,27 @@ _STANDARD_LOGRECORD_ATTRS = frozenset(
         "message",
         "trace_id",
         "span_id",
+        # Marcador interno de "este record ja passou pelo RedactionFilter".
+        # Fica aqui pra nao virar campo extra no JSON nem atributo no OTLP.
+        "_otel_redacted",
     }
 )
+
+
+class ExporterLoopGuardFilter(logging.Filter):
+    """Impede que o log do proprio exporter volte pro handler OTLP.
+
+    Com o handler OTLP no root logger, um aviso do exporter (backend fora,
+    retry) vira um log novo pra exportar, que gera outro aviso: o
+    `flush_telemetry` do finally nunca esvazia a fila e a invocacao Lambda
+    fica presa ate o timeout. O log continua saindo no stdout, que nao
+    realimenta nada.
+    """
+
+    _ORIGENS = ("opentelemetry", "urllib3", "requests")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith(self._ORIGENS)
 
 
 class RedactionFilter(logging.Filter):
@@ -232,16 +251,26 @@ class RedactionFilter(logging.Filter):
         super().__init__()
         policy = dict(DEFAULT_MASK_POLICY)
         for chave, estrategia in (mask_policy or {}).items():
+            # `Mask(...)` casa pelo valor do enum, que e minusculo: aceitar
+            # "LAST4" evita um ValueError so por causa da caixa.
+            if isinstance(estrategia, str):
+                estrategia = estrategia.lower()
             policy[chave.lower()] = Mask(estrategia)  # ValueError cedo, no startup
         for chave in redact_keys or []:
             policy.setdefault(chave.lower(), Mask.FULL)
         self._policy = policy
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # O mesmo record passa por 2 handlers (stdout e OTLP). Remascarar o
+        # valor ja mascarado muda o resultado (`*******8901` vira `*****` na
+        # chave Pix), entao a 2a passada e um no-op.
+        if getattr(record, "_otel_redacted", False):
+            return True
         for key, value in list(record.__dict__.items()):
             if key in _STANDARD_LOGRECORD_ATTRS:
                 continue
             record.__dict__[key] = self._redact(key, value)
+        record._otel_redacted = True
         return True
 
     def _redact(self, key: str, value: Any) -> Any:
@@ -478,6 +507,7 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
             level=logging.NOTSET,
             logger_provider=_logger_provider,
         )
+        otel_handler.addFilter(ExporterLoopGuardFilter())
         otel_handler.addFilter(TraceContextFilter())
         otel_handler.addFilter(_active_redaction_filter or RedactionFilter())
         logging.getLogger().addHandler(otel_handler)
@@ -511,7 +541,7 @@ def shutdown_log_export(timeout: int = 30) -> None:
             _module_logger.warning(f"Error during log export shutdown: {e}")
 
 
-def flush_log_export(timeout: int = 30) -> None:
+def flush_log_export(timeout: float = 30) -> None:
     """
     Flush the OTLP log exporter WITHOUT shutting it down.
 
@@ -524,7 +554,7 @@ def flush_log_export(timeout: int = 30) -> None:
 
     if _logger_provider:
         try:
-            _logger_provider.force_flush(timeout_millis=timeout * 1000)
+            _logger_provider.force_flush(timeout_millis=int(timeout * 1000))
         except Exception as e:
             _module_logger.warning(f"Error during log export flush: {e}")
 

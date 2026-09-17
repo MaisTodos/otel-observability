@@ -47,7 +47,7 @@ class TelemetryConfig:
     dogstatsd_host: str
     dogstatsd_port: int
     log_format: str | None = None
-    export_timeout: int = 3
+    export_timeout: float = 3.0
 
     @classmethod
     def from_env(cls) -> "TelemetryConfig":
@@ -131,19 +131,37 @@ class TelemetryConfig:
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
             log_level=os.getenv("OTEL_LOG_LEVEL", "INFO").upper(),
             log_format=(os.getenv("OTEL_LOG_FORMAT") or None),
-            export_timeout=int(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "3")),
+            export_timeout=float(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "3")),
             sample_rate=float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")),
             dogstatsd_enabled=dogstatsd_enabled,
             dogstatsd_host=dogstatsd_host,
             dogstatsd_port=dogstatsd_port,
         )
 
+    _FORMATOS_JSON = frozenset({"json"})
+    _FORMATOS_TEXTO = frozenset({"text", "plain", "console"})
+
     def resolve_json_logs(self, explicit: bool | None, default: bool) -> bool:
-        """Resolve o formato de log: parâmetro explícito > OTEL_LOG_FORMAT > default."""
+        """Resolve o formato de log: parâmetro explícito > OTEL_LOG_FORMAT > default.
+
+        Valor não reconhecido cai no default do entrypoint em vez de desligar o
+        JSON em silêncio — em Lambda o default é `True`, e um `OTEL_LOG_FORMAT=true`
+        derrubava o log estruturado sem erro nenhum.
+        """
         if explicit is not None:
             return explicit
-        if self.log_format:
-            return self.log_format.strip().lower() == "json"
+        valor = (self.log_format or "").strip().lower()
+        if valor in self._FORMATOS_JSON:
+            return True
+        if valor in self._FORMATOS_TEXTO:
+            return False
+        if valor:
+            warnings.warn(
+                f"OTEL_LOG_FORMAT={self.log_format!r} não é reconhecido "
+                "(use json, text, plain ou console); mantendo o default do "
+                f"entrypoint (json_logs={default})",
+                stacklevel=2,
+            )
         return default
 
     @staticmethod

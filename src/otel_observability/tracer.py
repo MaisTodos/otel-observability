@@ -107,6 +107,9 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
     )
 
 
+_FLUSH_MINIMO_SEGUNDOS = 0.1
+
+
 def shutdown_telemetry(timeout: int = 30) -> None:
     """
     Shutdown telemetry and flush remaining spans.
@@ -129,19 +132,33 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         logger.info("Telemetry shutdown complete")
 
 
-def flush_telemetry(timeout: int = 5) -> None:
+def flush_telemetry(timeout: float = 5) -> None:
     """Forca o envio do que esta em buffer, SEM desligar o provider.
 
     Lambda reaproveita container: chamar shutdown a cada invocacao deixa o
     BatchSpanProcessor morto da 2a em diante. Flush esvazia o buffer e mantem
     o provider utilizavel.
+
+    `timeout` e o orcamento TOTAL da invocacao, dividido entre logs e traces —
+    tratar o valor como "por sinal" dobrava o custo do `finally` em Lambda.
+
+    Limite medido (17/09/2026): com o coletor inalcancavel por rede, o
+    `force_flush` do SDK so retorna quando o export em curso termina, entao o
+    piso de cada sinal e `OTEL_EXPORTER_OTLP_TIMEOUT` vezes as tentativas, nao
+    o valor pedido aqui. Com backend recusando conexao (caso comum de sidecar
+    fora do ar), o flush fica em segundos.
     """
+    import time
+
     from .logging import flush_log_export
 
-    flush_log_export(timeout=timeout)
+    limite = time.monotonic() + timeout
+
+    flush_log_export(timeout=max(timeout / 2, _FLUSH_MINIMO_SEGUNDOS))
 
     if _tracer_provider:
-        _tracer_provider.force_flush(timeout_millis=timeout * 1000)
+        restante = max(limite - time.monotonic(), _FLUSH_MINIMO_SEGUNDOS)
+        _tracer_provider.force_flush(timeout_millis=int(restante * 1000))
 
 
 def get_tracer(name: str | None = None) -> trace_api.Tracer:

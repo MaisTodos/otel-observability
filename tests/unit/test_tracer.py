@@ -462,3 +462,21 @@ class TestResource:
         resource = otel_observability.tracer._tracer_provider.resource
         assert resource.attributes["telemetry.sdk.version"] == __version__
         assert resource.attributes["telemetry.sdk.version"] != "0.1.0"
+
+
+@pytest.mark.unit
+class TestFlushTelemetryOrcamento:
+    """O finally do Lambda nao pode gastar o timeout uma vez por sinal."""
+
+    def test_timeout_e_orcamento_total_nao_por_sinal(self):
+        import otel_observability.tracer as mod
+
+        provider = MagicMock()
+        with (
+            patch.object(mod, "_tracer_provider", provider),
+            patch("otel_observability.logging.flush_log_export") as flush_logs,
+        ):
+            mod.flush_telemetry(timeout=5)
+
+        assert flush_logs.call_args.kwargs["timeout"] <= 2.5
+        assert provider.force_flush.call_args.kwargs["timeout_millis"] <= 5000

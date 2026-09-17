@@ -519,3 +519,105 @@ class TestMaskDocument:
         assert "12345678" not in mask_document("12345678000199")
         assert mask_document(None) is None
         assert mask_document("") == ""
+
+
+@pytest.mark.unit
+class TestRedactionIdempotente:
+    """Filtro roda em 2 handlers (stdout e OTLP); a 2a passada nao pode remascarar."""
+
+    @staticmethod
+    def _record(**extra):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "msg", None, None)
+        for key, value in extra.items():
+            setattr(record, key, value)
+        return record
+
+    def test_pix_igual_nos_dois_handlers(self):
+        from otel_observability.logging import CONTA_DIGITAL_MASK_POLICY, RedactionFilter
+
+        record = self._record(pix_key="12345678901")
+        stdout_filter = RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY)
+        otlp_filter = RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY)
+
+        stdout_filter.filter(record)
+        valor_stdout = record.pix_key
+        otlp_filter.filter(record)
+
+        assert record.pix_key == valor_stdout
+        assert record.pix_key.endswith("8901")
+
+    def test_documento_nao_perde_os_4_digitos_na_segunda_passada(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = self._record(document="12345678901")
+        RedactionFilter().filter(record)
+        RedactionFilter().filter(record)
+
+        assert record.document.endswith("8901")
+
+    def test_marcador_nao_vaza_pro_log(self):
+        from otel_observability.logging import JSONFormatter, RedactionFilter
+
+        record = self._record(document="12345678901")
+        RedactionFilter().filter(record)
+
+        assert "_otel_redacted" not in json.loads(JSONFormatter().format(record))
+
+
+@pytest.mark.unit
+class TestMaskPolicyCaseInsensitive:
+    def test_nome_de_estrategia_em_maiusculo_e_aceito(self):
+        from otel_observability.logging import RedactionFilter
+
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "msg", None, None)
+        record.meu_campo = "12345678901"
+        RedactionFilter(mask_policy={"meu_campo": "LAST4"}).filter(record)
+
+        assert record.meu_campo.endswith("8901")
+
+
+@pytest.mark.unit
+class TestOtlpHandlerNaoExportaOProprioExporter:
+    """Aviso do exporter no handler OTLP vira log novo pra exportar: o flush nunca esvazia."""
+
+    def test_filtro_descarta_log_do_exporter(self):
+        from otel_observability.logging import ExporterLoopGuardFilter
+
+        guard = ExporterLoopGuardFilter()
+        do_exporter = logging.LogRecord(
+            "opentelemetry.exporter.otlp.proto.http._log_exporter",
+            logging.WARNING,
+            "p",
+            1,
+            "Transient error",
+            None,
+            None,
+        )
+        do_urllib3 = logging.LogRecord(
+            "urllib3.connectionpool", logging.WARNING, "p", 1, "Retrying", None, None
+        )
+        do_negocio = logging.LogRecord("app.pix", logging.INFO, "p", 1, "ok", None, None)
+
+        assert guard.filter(do_exporter) is False
+        assert guard.filter(do_urllib3) is False
+        assert guard.filter(do_negocio) is True
+
+    def test_handler_otlp_nasce_com_o_guard(self):
+        from unittest.mock import MagicMock as _MagicMock
+
+        import otel_observability.logging as mod
+
+        config = _MagicMock()
+        config.otlp_logs_endpoint = "http://localhost:4318/v1/logs"
+        config.otlp_headers = {}
+        config.export_timeout = 3
+
+        root = logging.getLogger()
+        antes = list(root.handlers)
+        try:
+            mod.init_otlp_log_export(config, resource=None)
+            novos = [h for h in root.handlers if h not in antes]
+            assert novos, "handler OTLP nao foi registrado"
+            assert any(isinstance(f, mod.ExporterLoopGuardFilter) for h in novos for f in h.filters)
+        finally:
+            root.handlers = antes

@@ -1,5 +1,34 @@
 # Changelog
 
+## [Fix] — Loop de flush em Lambda, máscara de Pix aplicada duas vezes e três arestas de configuração
+
+### Contexto
+
+Achados de uma revisão adversarial desta PR, todos reproduzidos por execução antes do fix.
+
+### Mudanças
+
+#### `logging.py`
+
+- `ExporterLoopGuardFilter` novo no handler OTLP: log dos próprios `opentelemetry`, `urllib3` e `requests` não é exportado. Com o handler OTLP no root logger, o aviso do exporter (backend fora, retry) virava um log novo para exportar, que gerava outro aviso — o `flush_telemetry` do `finally` nunca esvaziava a fila. Medido com o coletor recusando conexão: a primeira invocação passava de 110 segundos; com o guard, 5,3s e 2,9s. O log continua saindo no stdout, que não realimenta nada.
+- `RedactionFilter` virou idempotente. O mesmo record passa pelo handler de stdout e pelo OTLP; a segunda passada remascarava o valor já mascarado e a chave Pix perdia os 4 dígitos finais (`*******8901` no stdout, `*****` no Datadog). O marcador interno entra em `_STANDARD_LOGRECORD_ATTRS`, então não vira campo no JSON nem atributo no OTLP.
+- `mask_policy` aceita o nome da estratégia em qualquer caixa (`"LAST4"` e `"last4"`). Valor inexistente continua levantando `ValueError` no startup.
+
+#### `tracer.py`
+
+- `flush_telemetry(timeout=...)` passa a ser orçamento total da invocação, dividido entre logs e traces, em vez de valor por sinal.
+- Limite medido e documentado na docstring: com o coletor inalcançável por rede (pacote descartado, sem RST), o `force_flush` do SDK só retorna quando o export em curso termina, então o piso de cada sinal é `OTEL_EXPORTER_OTLP_TIMEOUT` vezes as tentativas, e não o valor pedido no flush.
+
+#### `config.py`
+
+- `OTEL_EXPORTER_OTLP_TIMEOUT` aceita fração de segundo (`1.5` derrubava o startup com `ValueError`).
+- `OTEL_LOG_FORMAT` com valor não reconhecido cai no default do entrypoint e emite warning, em vez de desligar o JSON em silêncio. `json` liga; `text`, `plain` e `console` desligam.
+
+### Verificação
+
+- 248 testes (eram 247), cobertura 90,08%.
+- Flush com o coletor recusando conexão: 5,3s e 2,9s em duas invocações seguidas do mesmo handler.
+
 ## [Doc + endpoint] — Endpoint genérico completa o path por sinal, gate de cobertura ativo e documentação consolidada
 
 ### Contexto

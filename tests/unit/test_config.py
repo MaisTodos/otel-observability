@@ -363,3 +363,25 @@ def test_versao_do_pacote_bate_com_pyproject():
 
     pyproject = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())
     assert __version__ == pyproject["project"]["version"]
+
+
+@pytest.mark.unit
+def test_timeout_aceita_fracao_de_segundo(monkeypatch):
+    """int() derrubava o startup com ValueError em 1.5."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "1.5")
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+
+    assert TelemetryConfig.from_env().export_timeout == 1.5
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("valor", ["true", "  ", "1", "yes"])
+def test_valor_desconhecido_de_log_format_cai_no_default(monkeypatch, valor):
+    """Em Lambda (default True), valor nao reconhecido nao pode desligar o JSON em silencio."""
+    monkeypatch.setenv("OTEL_LOG_FORMAT", valor)
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+
+    cfg = TelemetryConfig.from_env()
+
+    assert cfg.resolve_json_logs(None, default=True) is True
+    assert cfg.resolve_json_logs(None, default=False) is False
