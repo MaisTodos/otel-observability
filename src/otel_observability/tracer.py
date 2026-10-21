@@ -104,11 +104,13 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     init_otlp_log_export(_config, resource)
 
+    from .logging import _endpoint_seguro
+
     logger.info(
         f"Telemetry initialized: service={_config.service_name}, "
         f"env={_config.environment}, version={_config.service_version}, "
-        f"traces_endpoint={_config.otlp_traces_endpoint}, "
-        f"logs_endpoint={_config.otlp_logs_endpoint}, "
+        f"traces_endpoint={_endpoint_seguro(_config.otlp_traces_endpoint)}, "
+        f"logs_endpoint={_endpoint_seguro(_config.otlp_logs_endpoint)}, "
         f"sample_rate={_config.sample_rate}"
     )
 

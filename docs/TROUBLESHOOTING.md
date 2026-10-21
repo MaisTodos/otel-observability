@@ -41,6 +41,8 @@ Três fluxos, por sintoma. Cada um: sintoma → causas prováveis (em ordem) →
 
 Esperado: por padrão a lib grava só o tipo e os frames da exceção, porque a mensagem pode carregar dado sensível. Para ver o texto, `OTEL_RECORD_EXCEPTION_MESSAGE=true` (a mensagem sai sem mascaramento).
 
+Limites: se a exceção é relançada ao runtime da Lambda, o runtime registra o traceback com a mensagem no CloudWatch por conta própria, fora do alcance da lib. E um status de span escrito pelo serviço como `str(e)`, sem o prefixo `Tipo: `, não é reconhecido pelo sanitizador.
+
 ## 3. Contexto de trace não propaga entre serviços
 
 **Sintoma:** trace quebrado no Datadog — o span do consumidor abre trace novo, sem pai.

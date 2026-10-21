@@ -5,6 +5,26 @@ from typing import Any
 from opentelemetry import context
 from opentelemetry.propagate import extract, inject
 
+
+def _como_dict(valor: Any) -> dict:
+    return valor if isinstance(valor, dict) else {}
+
+
+def string_attribute(attr: Any, *keys: str) -> str | None:
+    """Valor string de um messageAttribute, ou None se o atributo não traz texto.
+
+    Atributo Binary, sem o campo ou de outro formato não pode derrubar o handler:
+    o erro subiria ao runtime e o lote voltaria até a DLQ.
+    """
+    if not isinstance(attr, dict):
+        return None
+    for key in keys:
+        value = attr.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 # ============================================================================
 # Injeção de Trace Context (Producer/Sender)
 # ============================================================================
@@ -227,8 +247,8 @@ def extract_context_from_sqs_message(message: dict[str, Any]):
     """
     carrier = {}
 
-    for key, attr in (message.get("messageAttributes") or {}).items():
-        value = attr.get("stringValue") if isinstance(attr, dict) else None
+    for key, attr in _como_dict(message.get("messageAttributes")).items():
+        value = string_attribute(attr, "stringValue")
         if value:
             carrier[key] = value
 
@@ -272,9 +292,9 @@ def extract_context_from_sns_message(record: dict[str, Any]):
     """
     carrier = {}
 
-    sns_attrs = (record.get("Sns") or {}).get("MessageAttributes") or {}
+    sns_attrs = _como_dict(_como_dict(record.get("Sns")).get("MessageAttributes"))
     for key, attr in sns_attrs.items():
-        value = attr.get("Value") if isinstance(attr, dict) else None
+        value = string_attribute(attr, "Value")
         if value:
             carrier[key] = value
 

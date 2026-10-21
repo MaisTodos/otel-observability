@@ -508,10 +508,12 @@ class FlattenAttributesLogRecordProcessor:
         return True
 
 
-def _endpoint_seguro(endpoint: str) -> str:
+def _endpoint_seguro(endpoint: str | None) -> str | None:
     """Só scheme e host: a URL pode trazer credencial no userinfo ou na query string."""
     from urllib.parse import urlsplit
 
+    if not endpoint:
+        return None
     partes = urlsplit(endpoint)
     return f"{partes.scheme}://{partes.hostname}" if partes.hostname else "<invalido>"
 
