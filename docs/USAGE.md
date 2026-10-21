@@ -183,10 +183,27 @@ Estratégias (`Mask`):
 | `Mask.LAST4` | `*******8901` | Documento: sustentação localiza pelos 4 dígitos |
 | `Mask.EMAIL` | `j*********@maistodos.com.br` | Domínio preservado |
 | `Mask.PIX` | Detecta o formato (CPF, e-mail, telefone, aleatória) e delega | Chave Pix não tem formato único |
+| `Mask.NAME` | `J. d. S.` (iniciais de cada palavra) | Nome de pessoa ou empresa |
 
 `DEFAULT_MASK_POLICY` (sempre ativa): `authorization`, `access_token`, `refresh_token`, `client_secret`, `password`, `secret`, `api_key`, `dd_api_key` → FULL; `document`, `document_number`, `cpf`, `cnpj`, `phone` → LAST4; `email` → EMAIL.
 
-`CONTA_DIGITAL_MASK_POLICY` (opt-in de serviços de Conta Digital): `account_document` → LAST4, `pix_key` e `addressing_key` → PIX.
+`CONTA_DIGITAL_MASK_POLICY` (opt-in de serviços de Conta Digital):
+
+- LAST4: `account_document`, `tax_id`, `account_number`, `account_branch` e os sufixos `*_document`, `*_cpf`, `*_cnpj`.
+- EMAIL: o sufixo `*_email`.
+- PIX: `pix_key`, `addressing_key`.
+- NAME: `account_name`, `holder_name`, `trade_name`, `user_name`.
+- Os nomes de conta, Pix e nome também valem como sufixo (`sender_account_number`, `recipient_pix_key`, `legal_holder_name`).
+- `name`, `key`, `event_name` e `file_name` não estão na policy de propósito.
+
+Como a chave é comparada:
+
+1. A chave do log é normalizada: camelCase e kebab viram snake e depois lower (`documentNumber` → `document_number`, `pix-key` → `pix_key`).
+2. Chave exata na policy.
+3. Sufixo: entrada da policy com `*` na frente, `{"*_document": Mask.LAST4}` casa `sender_document` e `customerDocument`. O sufixo mais longo vence. A chave `document` sozinha não casa `*_document`.
+4. Sem casamento, o valor sai intocado.
+
+`bytes` sob chave sensível são decodificados antes de mascarar.
 
 ```python
 from otel_observability import configure_logging, get_logger, mask_document, CONTA_DIGITAL_MASK_POLICY

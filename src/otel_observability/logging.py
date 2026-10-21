@@ -4,9 +4,11 @@ from collections.abc import Iterable
 from contextvars import ContextVar
 import dataclasses
 from enum import Enum
+from functools import lru_cache
 import json
 import logging
 import os
+import re
 import sys
 from typing import Any
 
@@ -106,6 +108,7 @@ class Mask(str, Enum):
     LAST4 = "last4"  # documento: sustentacao localiza pelos 4 digitos
     EMAIL = "email"  # j***@maistodos.com.br — dominio preservado
     PIX = "pix"  # detecta o formato do valor e delega
+    NAME = "name"
 
 
 # PII universal — vale em qualquer produto brasileiro.
@@ -127,18 +130,53 @@ DEFAULT_MASK_POLICY = {
 }
 
 # Vocabulário do domínio Conta Digital — o serviço OPTA por incluí-lo.
+# Não há "*_name": event_name e file_name são atributos de negócio, então cada nome sensível é listado.
 CONTA_DIGITAL_MASK_POLICY = {
     "account_document": Mask.LAST4,
+    "*_document": Mask.LAST4,
+    "*_cpf": Mask.LAST4,
+    "*_cnpj": Mask.LAST4,
+    "tax_id": Mask.LAST4,
+    "*_tax_id": Mask.LAST4,
+    "account_number": Mask.LAST4,
+    "*_account_number": Mask.LAST4,
+    "account_branch": Mask.LAST4,
+    "*_account_branch": Mask.LAST4,
+    "*_email": Mask.EMAIL,
+    "account_name": Mask.NAME,
+    "*_account_name": Mask.NAME,
+    "holder_name": Mask.NAME,
+    "*_holder_name": Mask.NAME,
+    "trade_name": Mask.NAME,
+    "*_trade_name": Mask.NAME,
+    "user_name": Mask.NAME,
+    "*_user_name": Mask.NAME,
     "pix_key": Mask.PIX,
+    "*_pix_key": Mask.PIX,
     "addressing_key": Mask.PIX,
+    "*_addressing_key": Mask.PIX,
 }
 
 _REDACTED = "*****"
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 # Acima disso a string passa direto: parsear JSON grande em todo log custaria mais que o ganho.
 _MAX_JSON_PARSE_CHARS = 64 * 1024
 # Corta ciclos e estruturas absurdas; o excedente vira _REDACTED em vez de estourar a pilha.
 _MAX_REDACT_DEPTH = 32
+
+
+def _texto(value: object) -> str:
+    # str(b"123") seria "b'123'" e deixaria o prefixo e o apóstrofo no que sobra do valor.
+    if isinstance(value, bytes | bytearray):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
+@lru_cache(maxsize=2048)
+def _normalize_key(key: str) -> str:
+    """camelCase e kebab viram snake, depois lower: documentNumber -> document_number."""
+    return _CAMEL_BOUNDARY.sub("_", key).replace("-", "_").lower()
 
 
 def mask_document(value: str | None, visible: int = 4) -> str | None:
@@ -149,7 +187,7 @@ def mask_document(value: str | None, visible: int = 4) -> str | None:
     """
     if value is None:
         return None
-    texto = str(value)
+    texto = _texto(value)
     if len(texto) <= visible:
         # Valor curto demais pra preservar sufixo sem entregar o dado inteiro.
         # Devolver em claro seria vazamento silencioso — mascara tudo.
@@ -158,14 +196,14 @@ def mask_document(value: str | None, visible: int = 4) -> str | None:
 
 
 def _mask_last4(value: object) -> str:
-    texto = str(value)
+    texto = _texto(value)
     if len(texto) <= 4:
         return "*" * len(texto)  # nunca devolver valor curto em claro
     return "*" * (len(texto) - 4) + texto[-4:]
 
 
 def _mask_email(value: object) -> str:
-    texto = str(value)
+    texto = _texto(value)
     local, sep, dominio = texto.partition("@")
     if not sep:
         return _mask_last4(texto)  # nao parece email, cai no generico
@@ -175,7 +213,7 @@ def _mask_email(value: object) -> str:
 
 def _mask_pix(value: object) -> str:
     """Chave Pix é CPF, email, telefone ou aleatória — detecta e delega."""
-    texto = str(value)
+    texto = _texto(value)
     if "@" in texto:
         return _mask_email(texto)
     somente_digitos = texto.lstrip("+").replace(".", "").replace("-", "")
@@ -184,7 +222,16 @@ def _mask_pix(value: object) -> str:
     return _REDACTED  # aleatoria: os 4 ultimos nao ajudam ninguem
 
 
-_ESTRATEGIAS = {Mask.LAST4: _mask_last4, Mask.EMAIL: _mask_email, Mask.PIX: _mask_pix}
+def _mask_name(value: object) -> str:
+    return " ".join(f"{parte[0]}." for parte in _texto(value).split())
+
+
+_ESTRATEGIAS = {
+    Mask.LAST4: _mask_last4,
+    Mask.EMAIL: _mask_email,
+    Mask.PIX: _mask_pix,
+    Mask.NAME: _mask_name,
+}
 
 
 # Atributos padrão do LogRecord que nunca devem ser inspecionados/redigidos.
@@ -288,16 +335,45 @@ class RedactionFilter(logging.Filter):
         redact_keys: Iterable[str] | None = None,
     ) -> None:
         super().__init__()
-        policy = dict(DEFAULT_MASK_POLICY)
+        self._policy: dict[str, Mask] = {}
+        self._suffixes: list[tuple[str, Mask]] = []
+        for chave, estrategia in DEFAULT_MASK_POLICY.items():
+            self._register(chave, estrategia)
         for chave, estrategia in (mask_policy or {}).items():
             # `Mask(...)` casa pelo valor do enum, que e minusculo: aceitar
             # "LAST4" evita um ValueError so por causa da caixa.
             if isinstance(estrategia, str):
                 estrategia = estrategia.lower()
-            policy[chave.lower()] = Mask(estrategia)  # ValueError cedo, no startup
+            self._register(chave, Mask(estrategia))  # ValueError cedo, no startup
         for chave in redact_keys or []:
-            policy.setdefault(chave.lower(), Mask.FULL)
-        self._policy = policy
+            self._register(chave, Mask.FULL, override=False)
+        self._suffixes.sort(key=lambda par: len(par[0]), reverse=True)
+
+    def _register(self, chave: str, estrategia: Mask, override: bool = True) -> None:
+        if chave.startswith("*"):
+            sufixo = _normalize_key(chave[1:].strip())
+            if not sufixo.strip("_"):
+                raise ValueError(f"sufixo vazio na mask_policy: {chave!r}")
+            sufixo = sufixo if sufixo.startswith("_") else f"_{sufixo}"
+            atuais = dict(self._suffixes)
+            if override or sufixo not in atuais:
+                atuais[sufixo] = estrategia
+            self._suffixes = list(atuais.items())
+            return
+        normalizada = _normalize_key(chave)
+        if override:
+            self._policy[normalizada] = estrategia
+        else:
+            self._policy.setdefault(normalizada, estrategia)
+
+    def _strategy_for(self, key: str) -> Mask | None:
+        normalizada = _normalize_key(key)
+        estrategia = self._policy.get(normalizada)
+        if estrategia is None:
+            for sufixo, candidata in self._suffixes:
+                if normalizada.endswith(sufixo):
+                    return candidata
+        return estrategia
 
     def filter(self, record: logging.LogRecord) -> bool:
         # O mesmo record passa por 2 handlers (stdout e OTLP). Remascarar o
@@ -314,7 +390,7 @@ class RedactionFilter(logging.Filter):
 
     def _redact(self, key: str, value: Any, depth: int = 0) -> Any:
         if isinstance(key, str):
-            estrategia = self._policy.get(key.lower())
+            estrategia = self._strategy_for(key)
             if estrategia is Mask.FULL:
                 return _REDACTED
             if estrategia is not None:

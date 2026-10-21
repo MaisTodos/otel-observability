@@ -1,5 +1,27 @@
 # Changelog
 
+## [Feat] — `mask_policy` casa por sufixo de chave, camelCase e kebab, e ganha `Mask.NAME` (CNT-3524)
+
+### Contexto
+
+A comparação era exata depois de `lower()`. Vazavam `documentNumber`, `customerDocument`, `pixKey`, `taxId`, `sender_document`, `recipient_document`, `account_number`, `account_branch`, `holder_name`, `user_email` e parentes. Além disso, bytes sob chave sensível saíam com sobra de dígitos: `str(b"12345678901")` é `"b'12345678901'"`, e a máscara de 4 caracteres deixava `**********901'`.
+
+### BREAKING
+
+- Quem usa `CONTA_DIGITAL_MASK_POLICY` passa a ter mascarados todos os campos que terminam em `_document`, `_cpf`, `_cnpj` e `_email`, além de `tax_id`, `account_number`, `account_branch`, `pix_key`, `addressing_key` e os nomes `account_name`, `holder_name`, `trade_name`, `user_name` (cada um também como sufixo, ex.: `sender_account_number`). Quem lia esses campos em claro no Datadog deixa de ver.
+- A chave é normalizada antes da busca (camelCase e kebab viram snake, depois lower), inclusive no `DEFAULT_MASK_POLICY`: `documentNumber` agora casa `document_number` e `Pix-Key` casa `pix_key`. A `DEFAULT_MASK_POLICY` em si não mudou.
+- `bytes` e `bytearray` sob chave sensível são decodificados (UTF-8, `errors="replace"`) antes de mascarar. Antes sobravam o prefixo `b'` e o apóstrofo final.
+
+### Mudanças
+
+#### `logging.py`
+
+- Sintaxe de sufixo: chave da policy com `*` na frente, `{"*_document": Mask.LAST4}`. Casa qualquer chave que termine em `_document`; a chave `document` sozinha não casa e continua sendo declarada à parte (já está no default). `*document` sem o sublinhado vale como `*_document`. Sufixo vazio (`"*"`, `"*_"`) levanta `ValueError` no startup.
+- Ordem de resolução: chave exata, depois o sufixo mais longo, depois nada (valor intocado).
+- `Mask.NAME`: iniciais de cada palavra (`"Joao da Silva"` vira `"J. d. S."`, `"Maria"` vira `"M."`, vazio continua vazio). Aceita o nome em qualquer caixa como as outras estratégias.
+- A policy não tem `*_name`, nem `key` ou `name` sozinhos: `event_name` e `file_name` são atributos de negócio, `key` é chave de cache e de S3 e `name` é atributo reservado do `LogRecord`. Cada nome sensível é listado.
+- `mask_document` aceita `bytes`.
+
 ## [Fix] — Objetos e strings JSON dentro de `extra` passam pelo mascaramento (CNT-3942)
 
 ### Contexto
