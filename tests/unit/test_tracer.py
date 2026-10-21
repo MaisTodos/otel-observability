@@ -143,7 +143,7 @@ class TestExportTimeout:
         init_telemetry()
 
         active_processor = otel_observability.tracer._tracer_provider._active_span_processor
-        exportador = active_processor._span_processors[0].span_exporter
+        exportador = active_processor._span_processors[1].span_exporter
         assert exportador._timeout == 2
 
     def test_export_timeout_chega_no_log_exporter(
@@ -352,7 +352,9 @@ class TestTraceDecorator:
             result = test_func(2, 3)
 
             assert result == 5
-            mock_tracer.start_as_current_span.assert_called_once_with("test_operation")
+            mock_tracer.start_as_current_span.assert_called_once_with(
+                "test_operation", record_exception=False, set_status_on_exception=False
+            )
 
     def test_trace_decorator_with_attributes(self):
         """Testa decorator @trace com atributos."""

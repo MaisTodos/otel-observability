@@ -10,9 +10,11 @@ from opentelemetry import context as otel_context
 from opentelemetry.propagate import extract
 from opentelemetry.trace import Status, StatusCode
 
+from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import configure_logging
+from .propagation import string_attribute
 
 # shutdown_telemetry segue importado como ponto de patch dos testes e da API
 # pública do wrapper — o finally passou a chamar flush_telemetry (container warm).
@@ -115,7 +117,9 @@ def instrument_lambda_handler(
             token = otel_context.attach(parent_context)
 
             try:
-                with tracer.start_as_current_span(span_name) as span:
+                with tracer.start_as_current_span(
+                    span_name, **SPAN_SEM_REGISTRO_AUTOMATICO
+                ) as span:
                     if lambda_context:
                         span.set_attributes(
                             {
@@ -137,8 +141,7 @@ def instrument_lambda_handler(
                         span.set_status(Status(StatusCode.OK))
                         return result
                     except Exception as e:
-                        span.set_status(Status(StatusCode.ERROR, str(e)))
-                        span.record_exception(e)
+                        mark_span_error(span, e)
                         logger.exception("Lambda handler error", exc_info=e)
                         raise
             finally:
@@ -163,21 +166,20 @@ def _extract_carrier_from_event(event: dict) -> dict:
         first_record = event["Records"][0]
 
         if first_record.get("eventSource") == "aws:sqs":
-            if "messageAttributes" in first_record:
-                attrs = first_record["messageAttributes"]
-                if "traceparent" in attrs:
-                    carrier["traceparent"] = attrs["traceparent"]["stringValue"]
-                if "tracestate" in attrs:
-                    carrier["tracestate"] = attrs["tracestate"]["stringValue"]
+            attrs = first_record.get("messageAttributes")
+            if isinstance(attrs, dict):
+                for chave in ("traceparent", "tracestate"):
+                    if valor := string_attribute(attrs.get(chave), "stringValue"):
+                        carrier[chave] = valor
                 logger.debug(f"Extracted context from SQS: {list(carrier.keys())}")
 
-        elif first_record.get("eventSource") == "aws:sns":  # noqa: SIM102
-            if "Sns" in first_record and "MessageAttributes" in first_record["Sns"]:
-                attrs = first_record["Sns"]["MessageAttributes"]
-                if "traceparent" in attrs:
-                    carrier["traceparent"] = attrs["traceparent"]["Value"]
-                if "tracestate" in attrs:
-                    carrier["tracestate"] = attrs["tracestate"]["Value"]
+        elif first_record.get("eventSource") == "aws:sns":
+            sns = first_record.get("Sns")
+            attrs = sns.get("MessageAttributes") if isinstance(sns, dict) else None
+            if isinstance(attrs, dict):
+                for chave in ("traceparent", "tracestate"):
+                    if valor := string_attribute(attrs.get(chave), "Value"):
+                        carrier[chave] = valor
                 logger.debug(f"Extracted context from SNS: {list(carrier.keys())}")
 
     elif "detail-type" in event and "detail" in event:

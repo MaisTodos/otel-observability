@@ -33,7 +33,7 @@ Sem endpoint de traces (nenhuma das duas setada), a lib emite no startup o warni
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | — | Endpoint de traces, com path completo | Não — sem ela, traces ficam desligados |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Base comum: a lib completa o path por sinal. Use as específicas OU esta | Não |
 | `OTEL_EXPORTER_OTLP_HEADERS` | — | Headers extras, formato `chave1=valor1,chave2=valor2` | Não |
-| `OTEL_EXPORTER_OTLP_TIMEOUT` | `3` | Timeout do export em segundos. É o cap do retry interno do exporter — protege o flush de Lambda contra backend fora do ar | Não |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | `3` | Timeout do export em segundos, finito e maior que 0 (valor inválido derruba o startup citando só o nome da variável). É o cap do retry interno do exporter — protege o flush de Lambda contra backend fora do ar | Não |
 | `OTEL_TRACES_ENABLED` | `true` | `false` desliga o exporter de traces explicitamente | Não |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` | Taxa de amostragem de spans raiz (0.0 a 1.0, fora da faixa levanta `ValueError`). Envolto em `ParentBased`: a decisão do chamador é respeitada | Não |
 | `OTEL_CONSOLE_EXPORT` | `false` | Imprime spans no console (debug local) | Não |
@@ -46,6 +46,7 @@ Sem endpoint de traces (nenhuma das duas setada), a lib emite no startup o warni
 |---|---|---|---|
 | `OTEL_LOG_LEVEL` | `INFO` | Nível do logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | Não |
 | `OTEL_LOG_FORMAT` | — | `json` (case-insensitive) liga logs JSON | Sim em produção |
+| `OTEL_RECORD_EXCEPTION_MESSAGE` | `false` | `true` volta a enviar o texto e o stacktrace completo da exceção no log e no span. Desligado, saem só o tipo e os frames. O `RedactionFilter` não mascara texto livre | Não |
 
 ### Métricas (DogStatsD)
 
@@ -53,7 +54,7 @@ Sem endpoint de traces (nenhuma das duas setada), a lib emite no startup o warni
 |---|---|---|---|
 | `DD_DOGSTATSD_ENABLED` | `true` | Liga o cliente DogStatsD | Não |
 | `DD_DOGSTATSD_HOST` | `localhost` | Host do Agent/Extension | Não |
-| `DD_DOGSTATSD_PORT` | `8125` | Porta UDP do Agent/Extension | Não |
+| `DD_DOGSTATSD_PORT` | `8125` | Porta UDP do Agent/Extension (1 a 65535) | Não |
 
 O envio de métricas exige o extra `metrics` (pacote `datadog`) **e** um Agent/Extension escutando em `host:porta`. UDP não reporta erro: sem o Agent, as métricas somem em silêncio. Ver `docs/ENTRYPOINTS.md`.
 

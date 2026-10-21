@@ -22,6 +22,11 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from ._excecao import (
+    SPAN_SEM_REGISTRO_AUTOMATICO,
+    ExceptionSanitizingSpanProcessor,
+    mark_span_error,
+)
 from .config import TelemetryConfig
 
 logger = logging.getLogger(__name__)
@@ -65,6 +70,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     sampler = ParentBased(root=TraceIdRatioBased(_config.sample_rate))
     _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
+    _tracer_provider.add_span_processor(ExceptionSanitizingSpanProcessor())
 
     if _config.traces_enabled and _config.otlp_traces_endpoint:
         otlp_exporter = OTLPSpanExporter(
@@ -98,11 +104,13 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     init_otlp_log_export(_config, resource)
 
+    from .logging import _endpoint_seguro
+
     logger.info(
         f"Telemetry initialized: service={_config.service_name}, "
         f"env={_config.environment}, version={_config.service_version}, "
-        f"traces_endpoint={_config.otlp_traces_endpoint}, "
-        f"logs_endpoint={_config.otlp_logs_endpoint}, "
+        f"traces_endpoint={_endpoint_seguro(_config.otlp_traces_endpoint)}, "
+        f"logs_endpoint={_endpoint_seguro(_config.otlp_logs_endpoint)}, "
         f"sample_rate={_config.sample_rate}"
     )
 
@@ -262,7 +270,7 @@ def trace(
         @wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             tracer = get_tracer(module_name)
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 # Set custom attributes
                 if attributes:
                     span.set_attributes(attributes)
@@ -276,14 +284,13 @@ def trace(
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     raise
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             tracer = get_tracer(module_name)
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 if attributes:
                     span.set_attributes(attributes)
 
@@ -295,8 +302,7 @@ def trace(
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     raise
 
         import asyncio

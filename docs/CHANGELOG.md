@@ -1,5 +1,59 @@
 # Changelog
 
+## [Fix] — Texto da exceção fora do log e do span, e env numérica inválida sem repetir o valor
+
+### Contexto
+
+O texto de uma exceção costuma carregar o dado que a levantou. Confirmado por execução com `ValueError("secret-value-123")` dentro de uma função com `@trace`: o marcador saía em `status.description`, em dois eventos `exception` do span (um da lib e outro do SDK, que também registra sozinho na saída do `with`) e no log JSON. Já `float(os.getenv(...))` com valor inválido levantava `ValueError` repetindo o valor da variável no traceback.
+
+### BREAKING
+
+- Por padrão, a mensagem da exceção não sai mais em log nem em span. O span fica com status `ERROR`, descrição só com o nome da classe e um evento `exception` com `exception.type`, sem `exception.message` nem `exception.stacktrace`. O log traz tipo e frames (arquivo, linha, função), sem a mensagem e sem a linha de código. Vale para `trace`, `instrument_lambda_handler`, `instrument_chalice` (HTTP) e `trace_sqs_message`; para qualquer `logger.exception` que passe pelo handler da lib (stdout e OTLP); para o log `app.log` do próprio Chalice, que captura a exceção da view e responde 500 sem passar pelo `except` do middleware (o span agora fecha como `ERROR`); e para qualquer span do processo, inclusive filho aberto com `get_tracer` e o da auto-instrumentação do FastAPI, por um `SpanProcessor` instalado por `init_telemetry` antes dos exporters.
+- `OTEL_RECORD_EXCEPTION_MESSAGE=true` restaura o comportamento anterior (mensagem e stacktrace completos, status no formato `Tipo: mensagem`). Diferença que sobra: o evento `exception` sai uma vez, não duas. Atenção: o `RedactionFilter` mascara por nome de campo, não varre texto livre, então com o opt-in ligado a mensagem sai como está.
+- Quem consulta `status.description` ou `exception.message` em monitor ou dashboard precisa ligar o opt-in ou migrar para `exception.type`.
+- `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_TRACES_SAMPLER_ARG` e `DD_DOGSTATSD_PORT` passam a ser validados no startup: timeout finito e maior que 0 (antes aceitava `0`, negativo, `nan` e `inf`), amostragem entre 0.0 e 1.0 (antes `nan` passava só pelo erro do `__post_init__`), porta de 1 a 65535.
+
+### Limites conhecidos
+
+- Exceção relançada ao runtime da Lambda: o runtime registra o traceback, com a mensagem, no CloudWatch por conta própria. Isso está fora do alcance da lib.
+- O sanitizador de span limpa status no formato `Tipo: mensagem` e os campos `exception.message` e `exception.stacktrace`. Status escrito à mão pelo serviço, como `str(e)` sem o prefixo do tipo, não é reconhecido e passa como está.
+
+### Mudanças
+
+#### `_excecao.py` (novo)
+
+- Ponto único do tratamento de exceção: `mark_span_error` e `safe_exception_text`, usados pelos pontos de instrumentação.
+- `ExceptionSanitizingSpanProcessor`: remove `exception.message` e `exception.stacktrace` dos eventos e a mensagem do status (`Tipo: mensagem` vira `Tipo`) de qualquer span ao encerrar. Descrição escrita à mão que não tenha o formato `Tipo: ` fica como está. Altera `_events` e `_status` do span, campos privados do SDK; há teste contra o SDK real.
+
+#### `aws_lambda.py`, `chalice.py`, `propagation.py`
+
+- `string_attribute` lê o texto de um atributo de mensagem e devolve `None` quando o atributo é Binary, não traz o campo ou não é um dict. Antes, `traceparent` Binary em SQS ou SNS levantava `KeyError` no decorator da Lambda, o handler não rodava e o lote voltava até a DLQ. Sem carrier W3C, o contexto atual é mantido.
+
+#### `tracer.py`
+
+- O log `Telemetry initialized` mostra os endpoints OTLP só com scheme e host.
+
+#### `chalice.py`
+
+- Filtro no handler de `app.log`: marca o span como `ERROR` (só o tipo) e tira a mensagem do traceback. O middleware não sobrescreve mais com `OK` uma resposta 5xx.
+
+#### `tracer.py`, `aws_lambda.py`, `chalice.py`
+
+- Os spans nascem com `record_exception=False` e `set_status_on_exception=False`. Só remover as linhas manuais não bastava: o `start_as_current_span` registra a exceção sozinho na saída do `with`. Efeito colateral corrigido: o evento `exception` saía duplicado.
+
+#### `logging.py`
+
+- `ExceptionMessageFilter` novo nos handlers de stdout e OTLP: descarta `exc_info` e deixa tipo e frames em `exc_text` e nos atributos `exception.type` e `exception.stacktrace`.
+- `JSONFormatter` usa a mesma forma segura quando usado sozinho.
+- Os avisos da própria lib (exporter OTLP de logs, flush, DogStatsD, auto-instrumentação) registram só o tipo da exceção. O log de inicialização do exporter OTLP mostra só scheme e host do endpoint, sem usuário nem query string.
+- Os atributos internos `_otel_redacted` e `_otel_exc_sanitized` deixam de ir para o OTLP.
+
+#### `config.py`
+
+- `_read_env_number` lê a env numérica e, se inválida, levanta `ValueError` citando só o nome da variável e a regra. O parse fica fora do `except`, então `__cause__` e `__context__` também não carregam o valor.
+- O aviso de `OTEL_LOG_FORMAT` não reconhecido deixa de ecoar o valor.
+- `DD_DOGSTATSD_PORT` só é validada com `DD_DOGSTATSD_ENABLED=true`.
+
 ## [Fix] — Loop de flush em Lambda, máscara de Pix aplicada duas vezes e três arestas de configuração
 
 ### Contexto
