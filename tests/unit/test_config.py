@@ -385,3 +385,92 @@ def test_valor_desconhecido_de_log_format_cai_no_default(monkeypatch, valor):
 
     assert cfg.resolve_json_logs(None, default=True) is True
     assert cfg.resolve_json_logs(None, default=False) is False
+
+
+MARCADOR_ENV = "secret-value-123"
+
+
+def _mensagens_encadeadas(exc: BaseException) -> str:
+    partes, atual = [], exc
+    while atual is not None:
+        partes += [str(atual), repr(atual)]
+        atual = atual.__cause__ or atual.__context__
+    return "\n".join(partes)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "variavel",
+    ["OTEL_EXPORTER_OTLP_TIMEOUT", "OTEL_TRACES_SAMPLER_ARG", "DD_DOGSTATSD_PORT"],
+)
+def test_env_numerica_invalida_nao_repete_o_valor(monkeypatch, variavel):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv(variavel, MARCADOR_ENV)
+
+    with pytest.raises(ValueError, match=variavel) as info:
+        TelemetryConfig.from_env()
+
+    assert MARCADOR_ENV not in _mensagens_encadeadas(info.value)
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("variavel", "valor"),
+    [
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", "0.001"),
+        ("OTEL_TRACES_SAMPLER_ARG", "0"),
+        ("OTEL_TRACES_SAMPLER_ARG", "1"),
+        ("DD_DOGSTATSD_PORT", "1"),
+        ("DD_DOGSTATSD_PORT", "65535"),
+    ],
+)
+def test_ultimo_valor_valido_passa(monkeypatch, variavel, valor):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv(variavel, valor)
+
+    TelemetryConfig.from_env()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("variavel", "valor"),
+    [
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", "0"),
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", "-1"),
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", "nan"),
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", "inf"),
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", ""),
+        ("OTEL_TRACES_SAMPLER_ARG", "nan"),
+        ("OTEL_TRACES_SAMPLER_ARG", "1.0001"),
+        ("OTEL_TRACES_SAMPLER_ARG", "-0.0001"),
+        ("DD_DOGSTATSD_PORT", "0"),
+        ("DD_DOGSTATSD_PORT", "65536"),
+        ("DD_DOGSTATSD_PORT", "-1"),
+        ("DD_DOGSTATSD_PORT", "8125.5"),
+    ],
+)
+def test_primeiro_valor_invalido_e_rejeitado_sem_ecoar(monkeypatch, variavel, valor):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv(variavel, valor)
+
+    with pytest.raises(ValueError, match=variavel) as info:
+        TelemetryConfig.from_env()
+
+    assert info.value.__context__ is None
+    if len(valor) > 1:
+        assert valor not in str(info.value)
+
+
+@pytest.mark.unit
+def test_aviso_de_log_format_desconhecido_nao_ecoa_o_valor(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv("OTEL_LOG_FORMAT", MARCADOR_ENV)
+    config = TelemetryConfig.from_env()
+
+    with pytest.warns(UserWarning, match="OTEL_LOG_FORMAT") as avisos:
+        config.resolve_json_logs(None, default=True)
+
+    assert all(MARCADOR_ENV not in str(a.message) for a in avisos)
+    assert any("json" in str(a.message) for a in avisos)

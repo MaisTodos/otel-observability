@@ -17,6 +17,7 @@ except ImportError:
     CHALICE_AVAILABLE = False
     Chalice = None
 
+from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import configure_logging
@@ -133,7 +134,7 @@ def instrument_chalice(
 
         try:
             span_name = f"{event.method} {event.path}"
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 # Adicionar atributos HTTP
                 span.set_attribute("http.method", event.method)
                 span.set_attribute("http.route", event.path)
@@ -159,8 +160,7 @@ def instrument_chalice(
                     span.set_status(Status(StatusCode.OK))
                     return response
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     logger.exception("Chalice HTTP request error", exc_info=e)
                     raise
         finally:
@@ -220,7 +220,7 @@ def trace_sqs_message(func: Callable) -> Callable:
 
         try:
             span_name = "sqs.process"
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 # Adicionar atributos SQS
                 span.set_attribute("messaging.system", "aws_sqs")
                 span.set_attribute("messaging.operation", "process")
@@ -245,8 +245,7 @@ def trace_sqs_message(func: Callable) -> Callable:
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     logger.exception("SQS message processing error", exc_info=e)
                     raise
         finally:

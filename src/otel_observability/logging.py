@@ -8,6 +8,7 @@ import os
 import sys
 from typing import Any
 
+from ._excecao import exception_type_name, record_exception_message, safe_exception_text
 from .tracer import get_current_span_id, get_current_trace_id
 
 # ContextVar para armazenar contexto customizado de log
@@ -209,6 +210,9 @@ _STANDARD_LOGRECORD_ATTRS = frozenset(
         # Marcador interno de "este record ja passou pelo RedactionFilter".
         # Fica aqui pra nao virar campo extra no JSON nem atributo no OTLP.
         "_otel_redacted",
+        "_otel_exc_sanitized",
+        "exception.type",
+        "exception.stacktrace",
     }
 )
 
@@ -227,6 +231,31 @@ class ExporterLoopGuardFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         return not record.name.startswith(self._ORIGENS)
+
+
+class ExceptionMessageFilter(logging.Filter):
+    """Tira o texto da exceção do record antes dos handlers (stdout e OTLP).
+
+    O texto de uma exceção costuma carregar o dado que a levantou. Sem
+    `OTEL_RECORD_EXCEPTION_MESSAGE=true`, `exc_info` é descartado e fica só tipo
+    e frames em `exc_text` (stdout) e em `exception.type`/`exception.stacktrace`
+    (atributos OTLP).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "_otel_exc_sanitized", False) or not record.exc_info:
+            return True
+        record._otel_exc_sanitized = True
+        if record_exception_message():
+            return True
+        exc_type, _, tb = record.exc_info
+        if exc_type is not None:
+            texto = safe_exception_text(exc_type, tb)
+            record.exc_text = texto
+            record.__dict__["exception.type"] = exception_type_name(exc_type)
+            record.__dict__["exception.stacktrace"] = texto
+        record.exc_info = None
+        return True
 
 
 class RedactionFilter(logging.Filter):
@@ -335,8 +364,12 @@ class JSONFormatter(logging.Formatter):
         }
 
         # Add exception info if present
-        if record.exc_info:
+        if record.exc_info and record_exception_message():
             log_data["exception"] = self.formatException(record.exc_info)
+        elif record.exc_info and record.exc_info[0] is not None:
+            log_data["exception"] = safe_exception_text(record.exc_info[0], record.exc_info[2])
+        elif record.exc_text:
+            log_data["exception"] = record.exc_text
 
         # Add extra fields
         for key, value in record.__dict__.items():
@@ -385,6 +418,7 @@ def configure_logging(
 
     # Add trace context filter
     handler.addFilter(TraceContextFilter())
+    handler.addFilter(ExceptionMessageFilter())
 
     # Add redaction filter (mascara dados sensíveis antes do formatter).
     # Guardado em global para o handler OTLP reaproveitar o mesmo filtro.
@@ -509,6 +543,7 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
         )
         otel_handler.addFilter(ExporterLoopGuardFilter())
         otel_handler.addFilter(TraceContextFilter())
+        otel_handler.addFilter(ExceptionMessageFilter())
         otel_handler.addFilter(_active_redaction_filter or RedactionFilter())
         logging.getLogger().addHandler(otel_handler)
 
@@ -519,7 +554,7 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
             "OTLP log exporter not available. Ensure opentelemetry-sdk>=1.20.0 is installed."
         )
     except Exception as e:
-        _module_logger.warning(f"Failed to initialize OTLP log exporter: {e}", exc_info=True)
+        _module_logger.warning("Failed to initialize OTLP log exporter: %s", type(e).__name__)
 
 
 def shutdown_log_export(timeout: int = 30) -> None:

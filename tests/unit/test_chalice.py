@@ -227,7 +227,8 @@ class TestInstrumentChalice:
                 middleware_func(mock_event, mock_get_response)
 
             mock_span.set_status.assert_called_once()
-            mock_span.record_exception.assert_called_once_with(test_error)
+            mock_span.record_exception.assert_not_called()
+            mock_span.add_event.assert_called_once()
             mock_logger.exception.assert_called_once()
 
     @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
@@ -463,7 +464,8 @@ class TestTraceSqsMessage:
                 decorated_handler(mock_event)
 
             mock_span.set_status.assert_called_once()
-            mock_span.record_exception.assert_called_once_with(test_error)
+            mock_span.record_exception.assert_not_called()
+            mock_span.add_event.assert_called_once()
             mock_logger.exception.assert_called_once()
 
     @pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")

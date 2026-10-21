@@ -140,7 +140,8 @@ class TestInstrumentLambdaHandler:
 
             # Verificar que span foi marcado como erro
             assert mock_span.set_status.called
-            assert mock_span.record_exception.called
+            mock_span.record_exception.assert_not_called()
+            mock_span.add_event.assert_called_once()
             mock_detach.assert_called_once_with(mock_token)
             mock_flush.assert_called_once()
 

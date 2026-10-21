@@ -352,7 +352,9 @@ class TestTraceDecorator:
             result = test_func(2, 3)
 
             assert result == 5
-            mock_tracer.start_as_current_span.assert_called_once_with("test_operation")
+            mock_tracer.start_as_current_span.assert_called_once_with(
+                "test_operation", record_exception=False, set_status_on_exception=False
+            )
 
     def test_trace_decorator_with_attributes(self):
         """Testa decorator @trace com atributos."""

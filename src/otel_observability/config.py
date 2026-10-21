@@ -1,8 +1,10 @@
 """Configuration for OpenTelemetry."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+import math
 import os
-from typing import Any
+from typing import Any, TypeVar
 import warnings
 
 _OTLP_SIGNAL_PATHS = {"traces": "/v1/traces", "metrics": "/v1/metrics", "logs": "/v1/logs"}
@@ -24,6 +26,28 @@ def _resolve_signal_endpoint(specific: str | None, generic: str | None, signal: 
     if generic and generic.strip():
         return generic.strip().rstrip("/") + _OTLP_SIGNAL_PATHS[signal]
     return None
+
+
+_N = TypeVar("_N", int, float)
+
+
+def _read_env_number(
+    name: str,
+    default: str,
+    cast: Callable[[str], _N],
+    expected: str,
+    in_range: Callable[[_N], bool],
+) -> _N:
+    # Parse fora do `except`: `from None` esconde a original só na exibição,
+    # e `__context__` ainda carregaria o valor da variável.
+    raw = os.getenv(name, default)
+    try:
+        value: _N | None = cast(raw)
+    except ValueError:
+        value = None
+    if value is None or not in_range(value):
+        raise ValueError(f"{name} is invalid: {expected}")
+    return value
 
 
 @dataclass
@@ -115,7 +139,13 @@ class TelemetryConfig:
         # DogStatsD configuration
         dogstatsd_enabled = os.getenv("DD_DOGSTATSD_ENABLED", "true").lower() == "true"
         dogstatsd_host = os.getenv("DD_DOGSTATSD_HOST", "localhost")
-        dogstatsd_port = int(os.getenv("DD_DOGSTATSD_PORT", "8125"))
+        dogstatsd_port = _read_env_number(
+            "DD_DOGSTATSD_PORT",
+            "8125",
+            int,
+            "dogstatsd_port must be an integer between 1 and 65535",
+            lambda v: 1 <= v <= 65535,
+        )
 
         return cls(
             service_name=os.getenv("OTEL_SERVICE_NAME", "unknown-service"),
@@ -131,8 +161,20 @@ class TelemetryConfig:
             enable_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
             log_level=os.getenv("OTEL_LOG_LEVEL", "INFO").upper(),
             log_format=(os.getenv("OTEL_LOG_FORMAT") or None),
-            export_timeout=float(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "3")),
-            sample_rate=float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")),
+            export_timeout=_read_env_number(
+                "OTEL_EXPORTER_OTLP_TIMEOUT",
+                "3",
+                float,
+                "export_timeout must be a finite number of seconds greater than 0",
+                lambda v: math.isfinite(v) and v > 0,
+            ),
+            sample_rate=_read_env_number(
+                "OTEL_TRACES_SAMPLER_ARG",
+                "1.0",
+                float,
+                "sample_rate must be between 0.0 and 1.0",
+                lambda v: 0.0 <= v <= 1.0,
+            ),
             dogstatsd_enabled=dogstatsd_enabled,
             dogstatsd_host=dogstatsd_host,
             dogstatsd_port=dogstatsd_port,
@@ -157,7 +199,7 @@ class TelemetryConfig:
             return False
         if valor:
             warnings.warn(
-                f"OTEL_LOG_FORMAT={self.log_format!r} não é reconhecido "
+                "OTEL_LOG_FORMAT não é reconhecido "
                 "(use json, text, plain ou console); mantendo o default do "
                 f"entrypoint (json_logs={default})",
                 stacklevel=2,
@@ -196,7 +238,7 @@ class TelemetryConfig:
             )
 
         if not 0.0 <= self.sample_rate <= 1.0:
-            raise ValueError(f"sample_rate must be between 0.0 and 1.0, got {self.sample_rate}")
+            raise ValueError("sample_rate must be between 0.0 and 1.0")
 
 
 # Chaves de ambiente que a lib consome direto de os.environ. Mantidas aqui para

@@ -22,6 +22,7 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
 from .config import TelemetryConfig
 
 logger = logging.getLogger(__name__)
@@ -262,7 +263,7 @@ def trace(
         @wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             tracer = get_tracer(module_name)
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 # Set custom attributes
                 if attributes:
                     span.set_attributes(attributes)
@@ -276,14 +277,13 @@ def trace(
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     raise
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             tracer = get_tracer(module_name)
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 if attributes:
                     span.set_attributes(attributes)
 
@@ -295,8 +295,7 @@ def trace(
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     raise
 
         import asyncio

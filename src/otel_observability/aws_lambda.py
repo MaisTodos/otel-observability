@@ -10,6 +10,7 @@ from opentelemetry import context as otel_context
 from opentelemetry.propagate import extract
 from opentelemetry.trace import Status, StatusCode
 
+from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import configure_logging
@@ -115,7 +116,9 @@ def instrument_lambda_handler(
             token = otel_context.attach(parent_context)
 
             try:
-                with tracer.start_as_current_span(span_name) as span:
+                with tracer.start_as_current_span(
+                    span_name, **SPAN_SEM_REGISTRO_AUTOMATICO
+                ) as span:
                     if lambda_context:
                         span.set_attributes(
                             {
@@ -137,8 +140,7 @@ def instrument_lambda_handler(
                         span.set_status(Status(StatusCode.OK))
                         return result
                     except Exception as e:
-                        span.set_status(Status(StatusCode.ERROR, str(e)))
-                        span.record_exception(e)
+                        mark_span_error(span, e)
                         logger.exception("Lambda handler error", exc_info=e)
                         raise
             finally:
