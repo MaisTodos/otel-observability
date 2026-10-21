@@ -2,7 +2,9 @@
 
 from collections.abc import Iterable
 from contextvars import ContextVar
+import dataclasses
 from enum import Enum
+import json
 import logging
 import os
 import sys
@@ -132,6 +134,11 @@ CONTA_DIGITAL_MASK_POLICY = {
 }
 
 _REDACTED = "*****"
+
+# Acima disso a string passa direto: parsear JSON grande em todo log custaria mais que o ganho.
+_MAX_JSON_PARSE_CHARS = 64 * 1024
+# Corta ciclos e estruturas absurdas; o excedente vira _REDACTED em vez de estourar a pilha.
+_MAX_REDACT_DEPTH = 32
 
 
 def mask_document(value: str | None, visible: int = 4) -> str | None:
@@ -305,20 +312,56 @@ class RedactionFilter(logging.Filter):
         record._otel_redacted = True
         return True
 
-    def _redact(self, key: str, value: Any) -> Any:
+    def _redact(self, key: str, value: Any, depth: int = 0) -> Any:
         if isinstance(key, str):
             estrategia = self._policy.get(key.lower())
             if estrategia is Mask.FULL:
                 return _REDACTED
             if estrategia is not None:
                 return _ESTRATEGIAS[estrategia](value)
+        if depth >= _MAX_REDACT_DEPTH:
+            return _REDACTED
         if isinstance(value, dict):
-            return {k: self._redact(k, v) for k, v in value.items()}
+            return {k: self._redact(k, v, depth + 1) for k, v in value.items()}
         if isinstance(value, list):
-            return [self._redact(key, item) for item in value]
+            return [self._redact(key, item, depth + 1) for item in value]
         if isinstance(value, tuple):
-            return tuple(self._redact(key, item) for item in value)
+            return tuple(self._redact(key, item, depth + 1) for item in value)
+        if isinstance(value, set | frozenset):
+            return type(value)(self._redact(key, item, depth + 1) for item in value)
+        if isinstance(value, str):
+            return self._redact_json_string(key, value, depth)
+        convertido = _as_plain_data(value)
+        if convertido is not value:
+            return self._redact(key, convertido, depth + 1)
         return value
+
+    def _redact_json_string(self, key: str, texto: str, depth: int) -> str:
+        if len(texto) > _MAX_JSON_PARSE_CHARS or texto.lstrip()[:1] not in ("{", "["):
+            return texto
+        try:
+            original = json.loads(texto)
+        except ValueError:
+            return texto
+        except RecursionError:
+            return _REDACTED  # parece JSON mas nao da pra abrir: nao emite o conteudo
+        mascarado = self._redact(key, original, depth + 1)
+        if mascarado == original:
+            return texto
+        return json.dumps(mascarado, ensure_ascii=False, default=str)
+
+
+def _as_plain_data(value: Any) -> Any:
+    if isinstance(value, type):
+        return value
+    try:
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="json")
+        if dataclasses.is_dataclass(value):
+            return dataclasses.asdict(value)
+    except Exception:
+        return _REDACTED  # nao deu pra abrir o objeto: nao arrisca emitir o str() dele
+    return value
 
 
 class JSONFormatter(logging.Formatter):
@@ -351,7 +394,6 @@ class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         from datetime import datetime
-        import json
 
         log_data = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -379,7 +421,7 @@ class JSONFormatter(logging.Formatter):
             if key not in _STANDARD_LOGRECORD_ATTRS:
                 log_data[key] = value
 
-        return json.dumps(log_data)
+        return json.dumps(log_data, default=str)
 
 
 def configure_logging(

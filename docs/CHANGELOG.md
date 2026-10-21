@@ -1,5 +1,26 @@
 # Changelog
 
+## [Fix] — Objetos e strings JSON dentro de `extra` passam pelo mascaramento (CNT-3942)
+
+### Contexto
+
+Dois defeitos medidos com `extra={"input": dto}`: o `JSONFormatter` levantava `TypeError` (`json.dumps` sem `default`) e a linha sumia do stdout, enquanto o caminho OTLP fazia `str(obj)` e mandava o dado em claro. E `extra={"props": {"event": json.dumps(event)}}`, `model_dump_json()` e `response.text` chegavam inteiros, porque o `RedactionFilter` só abria dict, lista e tupla.
+
+### BREAKING
+
+- Objetos pydantic v2 (`model_dump`) e dataclasses em `extra` saem como dict mascarado, não mais como `str(obj)`. Quem consultava no Datadog o atributo `input` como texto passa a encontrar `input.<campo>`.
+- String de até 64 KB que começa com `{` ou `[` e é JSON válido é aberta, mascarada e serializada de novo. Só é reescrita se algo foi mascarado; sem dado sensível, sai byte a byte igual. Acima de 64 KB passa direto, sem mascarar.
+- Conjuntos (`set`, `frozenset`) agora são percorridos.
+
+### Mudanças
+
+#### `logging.py`
+
+- `RedactionFilter` converte pydantic v2 (detectado por `hasattr(v, "model_dump")`, sem importar pydantic) com `model_dump(mode="json")` e dataclass com `asdict`, e segue na recursão normal. Se a conversão falhar, o valor vira `*****`.
+- Profundidade máxima de 32 níveis; o excedente vira `*****`. JSON que estoura a pilha do parser também vira `*****`, nunca sai em claro.
+- `JSONFormatter` usa `json.dumps(..., default=str)`: `UUID`, `Decimal`, `datetime` e objetos arbitrários não derrubam mais a linha.
+- O filtro continua rodando uma vez por record (idempotente), então o handler OTLP recebe o valor já mascarado.
+
 ## [Fix] — Texto da exceção fora do log e do span, e env numérica inválida sem repetir o valor
 
 ### Contexto

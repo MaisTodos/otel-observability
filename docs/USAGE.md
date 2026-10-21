@@ -173,7 +173,7 @@ Complementos de span em `otel_observability`:
 
 ## 6. Redação de PII — `mask_policy`
 
-O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Roda nos dois caminhos — handler de stdout **e** handler OTLP — então tanto o stream local quanto o exportado saem mascarados. A recursão cobre dicts, listas e tuplas.
+O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Roda nos dois caminhos — handler de stdout **e** handler OTLP — então tanto o stream local quanto o exportado saem mascarados. A recursão cobre dicts, listas, tuplas e conjuntos, e também abre objetos pydantic v2, dataclasses e strings JSON (até 64 KB) que apareçam dentro de `extra`: `extra={"input": dto}` e `extra={"props": {"event": json.dumps(evento)}}` saem mascarados nos dois caminhos. Tipos que o JSON não conhece (`UUID`, `Decimal`, `datetime`) saem como texto em vez de derrubar a linha.
 
 Estratégias (`Mask`):
 
