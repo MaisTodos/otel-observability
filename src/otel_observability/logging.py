@@ -158,12 +158,19 @@ CONTA_DIGITAL_MASK_POLICY = {
 }
 
 _REDACTED = "*****"
+# Valor numerico ou nulo sob chave sensivel por sufixo com estes prefixos e flag ou contagem
+# (has_document=False, total_cnpj=3), nao o dado; bool nunca e mascarado.
+FLAG_KEY_PREFIXES = ("has_", "is_", "total_", "count_", "num_", "qty_")
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
-# Acima disso a string passa direto: parsear JSON grande em todo log custaria mais que o ganho.
-_MAX_JSON_PARSE_CHARS = 64 * 1024
+# Acima disso (em bytes UTF-8) a string passa direto: parsear JSON grande em todo log custaria mais que o ganho.
+_MAX_JSON_PARSE_BYTES = 64 * 1024
+# Medir em bytes custa um encode; abaixo disso 1 caractere cabe em, no maximo, 4 bytes sem passar do limite.
+_BYTE_CHECK_FROM_CHARS = _MAX_JSON_PARSE_BYTES // 4
+_JSON_START = re.compile(r"[\ufeff \t\r\n]*([\[{])")
 # Corta ciclos e estruturas absurdas; o excedente vira _REDACTED em vez de estourar a pilha.
 _MAX_REDACT_DEPTH = 32
+_STRATEGY_CACHE_MAX = 4096
 
 
 def _texto(value: object) -> str:
@@ -337,6 +344,7 @@ class RedactionFilter(logging.Filter):
         super().__init__()
         self._policy: dict[str, Mask] = {}
         self._suffixes: list[tuple[str, Mask]] = []
+        self._strategy_cache: dict[str, Mask | None] = {}
         for chave, estrategia in DEFAULT_MASK_POLICY.items():
             self._register(chave, estrategia)
         for chave, estrategia in (mask_policy or {}).items():
@@ -367,12 +375,20 @@ class RedactionFilter(logging.Filter):
             self._policy.setdefault(normalizada, estrategia)
 
     def _strategy_for(self, key: str) -> Mask | None:
+        try:
+            return self._strategy_cache[key]
+        except KeyError:
+            pass
         normalizada = _normalize_key(key)
         estrategia = self._policy.get(normalizada)
         if estrategia is None:
             for sufixo, candidata in self._suffixes:
                 if normalizada.endswith(sufixo):
-                    return candidata
+                    estrategia = candidata
+                    break
+        if len(self._strategy_cache) >= _STRATEGY_CACHE_MAX:
+            self._strategy_cache.clear()  # chaves de dict podem ser dados (ids): nao deixa crescer
+        self._strategy_cache[key] = estrategia
         return estrategia
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -384,7 +400,11 @@ class RedactionFilter(logging.Filter):
         for key, value in list(record.__dict__.items()):
             if key in _STANDARD_LOGRECORD_ATTRS:
                 continue
-            record.__dict__[key] = self._redact(key, value)
+            try:
+                record.__dict__[key] = self._redact(key, value)
+            except Exception:
+                # Filtro que levanta derruba o logger.info de quem chama; fecha mascarando.
+                record.__dict__[key] = _REDACTED
         record._otel_redacted = True
         return True
 
@@ -394,49 +414,119 @@ class RedactionFilter(logging.Filter):
             if estrategia is Mask.FULL:
                 return _REDACTED
             if estrategia is not None:
-                return _ESTRATEGIAS[estrategia](value)
+                return self._apply(estrategia, _normalize_key(key), value, depth)
         if depth >= _MAX_REDACT_DEPTH:
             return _REDACTED
+        if isinstance(value, tuple) and hasattr(value, "_asdict"):
+            value = value._asdict()
         if isinstance(value, dict):
-            return {k: self._redact(k, v, depth + 1) for k, v in value.items()}
+            return {
+                chave: self._redact(chave, item, depth + 1)
+                for chave, item in ((_str_key(k), v) for k, v in value.items())
+            }
         if isinstance(value, list):
             return [self._redact(key, item, depth + 1) for item in value]
         if isinstance(value, tuple):
             return tuple(self._redact(key, item, depth + 1) for item in value)
         if isinstance(value, set | frozenset):
-            return type(value)(self._redact(key, item, depth + 1) for item in value)
+            itens = (self._redact(key, item, depth + 1) for item in value)
+            return frozenset(itens) if isinstance(value, frozenset) else set(itens)
         if isinstance(value, str):
             return self._redact_json_string(key, value, depth)
+        if isinstance(value, bytes | bytearray):
+            texto = bytes(value).decode("utf-8", errors="replace")
+            resultado = self._redact_json_string(key, texto, depth)
+            return value if resultado is texto else resultado
         convertido = _as_plain_data(value)
         if convertido is not value:
             return self._redact(key, convertido, depth + 1)
         return value
 
+    def _apply(self, estrategia: Mask, chave: str, value: Any, depth: int) -> Any:
+        """Aplica a estrategia da chave a cada folha do valor, qualquer que seja o container."""
+        if depth >= _MAX_REDACT_DEPTH:
+            return _REDACTED
+        if isinstance(value, tuple) and hasattr(value, "_asdict"):
+            value = value._asdict()
+        if isinstance(value, dict):
+            return {
+                _str_key(k): self._apply(estrategia, chave, v, depth + 1) for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [self._apply(estrategia, chave, item, depth + 1) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._apply(estrategia, chave, item, depth + 1) for item in value)
+        if isinstance(value, set | frozenset):
+            itens = (self._apply(estrategia, chave, item, depth + 1) for item in value)
+            return frozenset(itens) if isinstance(value, frozenset) else set(itens)
+        if isinstance(value, bool) or (
+            isinstance(value, int | float | type(None)) and chave.startswith(FLAG_KEY_PREFIXES)
+        ):
+            return value
+        if not isinstance(value, str | bytes | bytearray):
+            convertido = _as_plain_data(value)
+            if convertido is not value:
+                return self._apply(estrategia, chave, convertido, depth + 1)
+        return _ESTRATEGIAS[estrategia](value)
+
     def _redact_json_string(self, key: str, texto: str, depth: int) -> str:
-        if len(texto) > _MAX_JSON_PARSE_CHARS or texto.lstrip()[:1] not in ("{", "["):
+        tamanho = len(texto)
+        if tamanho > _MAX_JSON_PARSE_BYTES:
+            return texto
+        if tamanho > _BYTE_CHECK_FROM_CHARS and (
+            len(texto.encode("utf-8", errors="surrogatepass")) > _MAX_JSON_PARSE_BYTES
+        ):
+            return texto
+        inicio = _JSON_START.match(texto)
+        if inicio is None:
             return texto
         try:
-            original = json.loads(texto)
-        except ValueError:
+            original = json.loads(texto[inicio.start(1) :])
+        except json.JSONDecodeError:
             return texto
-        except RecursionError:
-            return _REDACTED  # parece JSON mas nao da pra abrir: nao emite o conteudo
+        except (ValueError, RecursionError):
+            return _REDACTED  # parece JSON e nao abriu por limite do parser: nao emite o conteudo
         mascarado = self._redact(key, original, depth + 1)
         if mascarado == original:
             return texto
-        return json.dumps(mascarado, ensure_ascii=False, default=str)
+        saida = json.dumps(mascarado, ensure_ascii=False, default=str)
+        try:
+            saida.encode("utf-8")
+        except UnicodeEncodeError:
+            saida = json.dumps(
+                mascarado, default=str
+            )  # surrogate solto: o OTLP descartaria o atributo
+        return saida
+
+
+def _str_key(chave: Any) -> str:
+    return chave if isinstance(chave, str) else str(chave)
 
 
 def _as_plain_data(value: Any) -> Any:
     if isinstance(value, type):
         return value
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if dataclasses.is_dataclass(value):
+        return dataclasses.asdict(value)
+    return value
+
+
+def _json_default(valor: Any) -> str:
     try:
-        if hasattr(value, "model_dump"):
-            return value.model_dump(mode="json")
-        if dataclasses.is_dataclass(value):
-            return dataclasses.asdict(value)
+        return str(valor)
     except Exception:
-        return _REDACTED  # nao deu pra abrir o objeto: nao arrisca emitir o str() dele
+        return f"<{type(valor).__name__}>"
+
+
+def _with_str_keys(value: Any, depth: int = 0) -> Any:
+    if depth >= _MAX_REDACT_DEPTH:
+        return _REDACTED
+    if isinstance(value, dict):
+        return {_str_key(k): _with_str_keys(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_with_str_keys(item, depth + 1) for item in value]
     return value
 
 
@@ -497,7 +587,11 @@ class JSONFormatter(logging.Formatter):
             if key not in _STANDARD_LOGRECORD_ATTRS:
                 log_data[key] = value
 
-        return json.dumps(log_data, default=str)
+        try:
+            return json.dumps(log_data, default=_json_default)
+        except (TypeError, ValueError):
+            # Chave que nao e str (date, UUID, tupla) ou ciclo: `default=` nao cobre chaves.
+            return json.dumps(_with_str_keys(log_data), default=_json_default)
 
 
 def configure_logging(

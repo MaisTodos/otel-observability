@@ -6,6 +6,7 @@ from decimal import Decimal
 import io
 import json
 import logging
+import sys
 from uuid import UUID
 
 import pytest
@@ -61,9 +62,11 @@ class Pipeline:
         stdout = logging.StreamHandler(self.stream)
         stdout.setFormatter(JSONFormatter())
         otlp = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
+        self.errors = []
         for handler in (stdout, otlp):
             handler.addFilter(TraceContextFilter())
             handler.addFilter(redaction)
+            handler.handleError = lambda _record: self.errors.append(sys.exc_info()[1])
 
         self.logger = logging.getLogger(f"test.extra.{id(self)}")
         self.logger.handlers = [stdout, otlp]
@@ -71,8 +74,17 @@ class Pipeline:
         self.logger.setLevel(logging.INFO)
 
     def emit(self, **extra):
+        self.exporter.clear()
+        self.stream.seek(0)
+        self.stream.truncate()
         self.logger.info("evento", extra=extra)
         return self.stdout_text(), self.otlp_text()
+
+    def encoded(self):
+        """Serializa pelo encoder OTLP real; um atributo que ele descarta nao aparece aqui."""
+        from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
+
+        return str(encode_logs(self.exporter.get_finished_logs()))
 
     def stdout_text(self):
         return self.stream.getvalue()

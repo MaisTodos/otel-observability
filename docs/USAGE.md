@@ -173,7 +173,13 @@ Complementos de span em `otel_observability`:
 
 ## 6. Redação de PII — `mask_policy`
 
-O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Roda nos dois caminhos — handler de stdout **e** handler OTLP — então tanto o stream local quanto o exportado saem mascarados. A recursão cobre dicts, listas, tuplas e conjuntos, e também abre objetos pydantic v2, dataclasses e strings JSON (até 64 KB) que apareçam dentro de `extra`: `extra={"input": dto}` e `extra={"props": {"event": json.dumps(evento)}}` saem mascarados nos dois caminhos. Tipos que o JSON não conhece (`UUID`, `Decimal`, `datetime`) saem como texto em vez de derrubar a linha.
+O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Roda nos dois caminhos — handler de stdout **e** handler OTLP — então tanto o stream local quanto o exportado saem mascarados. A recursão cobre dicts, listas, tuplas e conjuntos, e também abre objetos pydantic v2, dataclasses e strings JSON (até 64 KB) que apareçam dentro de `extra`: `extra={"input": dto}` e `extra={"props": {"event": json.dumps(evento)}}` saem mascarados nos dois caminhos. Tipos que o JSON não conhece (`UUID`, `Decimal`, `datetime`) saem como texto em vez de derrubar a linha, e chaves de dict que não são texto viram `str(chave)`. Bytes com JSON seguem o mesmo caminho. O limite de 64 KB é em bytes UTF-8.
+
+Limites conhecidos:
+
+- O filtro troca o valor no próprio record. Um handler seu que roda depois dos handlers com o `RedactionFilter` recebe `dict` no lugar do objeto; um que roda antes vê o dado em claro. Se precisar do objeto original, ponha esse handler antes na lista `logger.handlers` e não exporte o dado por ele.
+- Pydantic com `@model_serializer` que renomeia campos é mascarado pelos nomes novos. Objeto com `__slots__` sem `model_dump` nem dataclass sai como `str()`. Nesses casos use a chave exata na `mask_policy` ou converta para dict antes de logar.
+- Conjunto de strings soltas (sem chave) não é mascarado. Estrutura com mais de 32 níveis sai com `*****` no corte.
 
 Estratégias (`Mask`):
 
@@ -203,7 +209,7 @@ Como a chave é comparada:
 3. Sufixo: entrada da policy com `*` na frente, `{"*_document": Mask.LAST4}` casa `sender_document` e `customerDocument`. O sufixo mais longo vence. A chave `document` sozinha não casa `*_document`.
 4. Sem casamento, o valor sai intocado.
 
-`bytes` sob chave sensível são decodificados antes de mascarar.
+`bytes` sob chave sensível são decodificados antes de mascarar. A estratégia vale para cada elemento de lista, tupla e conjunto e para cada valor de dict sob a chave. Flags e contagens não são mascaradas: `bool` nunca, e número ou `None` quando a chave começa com `has_`, `is_`, `total_`, `count_`, `num_` ou `qty_` (`has_document=False`, `total_cnpj=3`).
 
 ```python
 from otel_observability import configure_logging, get_logger, mask_document, CONTA_DIGITAL_MASK_POLICY
