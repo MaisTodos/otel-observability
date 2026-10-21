@@ -158,9 +158,11 @@ CONTA_DIGITAL_MASK_POLICY = {
 }
 
 _REDACTED = "*****"
-# Valor numerico ou nulo sob chave sensivel por sufixo com estes prefixos e flag ou contagem
-# (has_document=False, total_cnpj=3), nao o dado; bool nunca e mascarado.
-FLAG_KEY_PREFIXES = ("has_", "is_", "total_", "count_", "num_", "qty_")
+# Numero pequeno ou nulo sob chave sensivel POR SUFIXO com estes prefixos e flag ou contagem
+# (has_document=False, total_cnpj=3); chave exata da policy nunca e poupada, e bool nunca e mascarado.
+FLAG_KEY_PREFIXES = ("has_", "is_", "total_", "count_")
+# Contagem de verdade e pequena; um numero maior que isto sob "total_cpf" e o documento.
+_MAX_COUNT_VALUE = 10_000
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 # Acima disso (em bytes UTF-8) a string passa direto: parsear JSON grande em todo log custaria mais que o ganho.
@@ -344,7 +346,7 @@ class RedactionFilter(logging.Filter):
         super().__init__()
         self._policy: dict[str, Mask] = {}
         self._suffixes: list[tuple[str, Mask]] = []
-        self._strategy_cache: dict[str, Mask | None] = {}
+        self._strategy_cache: dict[str, tuple[Mask | None, bool]] = {}
         for chave, estrategia in DEFAULT_MASK_POLICY.items():
             self._register(chave, estrategia)
         for chave, estrategia in (mask_policy or {}).items():
@@ -374,22 +376,26 @@ class RedactionFilter(logging.Filter):
         else:
             self._policy.setdefault(normalizada, estrategia)
 
-    def _strategy_for(self, key: str) -> Mask | None:
+    def _strategy_for(self, key: str) -> tuple[Mask | None, bool]:
+        """Estrategia da chave e se ela veio de sufixo e de chave com prefixo de flag."""
         try:
             return self._strategy_cache[key]
         except KeyError:
             pass
         normalizada = _normalize_key(key)
         estrategia = self._policy.get(normalizada)
+        poupa_contagem = False
         if estrategia is None:
             for sufixo, candidata in self._suffixes:
                 if normalizada.endswith(sufixo):
                     estrategia = candidata
+                    poupa_contagem = normalizada.startswith(FLAG_KEY_PREFIXES)
                     break
+        resultado = (estrategia, poupa_contagem)
         if len(self._strategy_cache) >= _STRATEGY_CACHE_MAX:
             self._strategy_cache.clear()  # chaves de dict podem ser dados (ids): nao deixa crescer
-        self._strategy_cache[key] = estrategia
-        return estrategia
+        self._strategy_cache[key] = resultado
+        return resultado
 
     def filter(self, record: logging.LogRecord) -> bool:
         # O mesmo record passa por 2 handlers (stdout e OTLP). Remascarar o
@@ -410,11 +416,11 @@ class RedactionFilter(logging.Filter):
 
     def _redact(self, key: str, value: Any, depth: int = 0) -> Any:
         if isinstance(key, str):
-            estrategia = self._strategy_for(key)
+            estrategia, poupa_contagem = self._strategy_for(key)
             if estrategia is Mask.FULL:
                 return _REDACTED
             if estrategia is not None:
-                return self._apply(estrategia, _normalize_key(key), value, depth)
+                return self._apply(estrategia, poupa_contagem, value, depth)
         if depth >= _MAX_REDACT_DEPTH:
             return _REDACTED
         if isinstance(value, tuple) and hasattr(value, "_asdict"):
@@ -442,7 +448,7 @@ class RedactionFilter(logging.Filter):
             return self._redact(key, convertido, depth + 1)
         return value
 
-    def _apply(self, estrategia: Mask, chave: str, value: Any, depth: int) -> Any:
+    def _apply(self, estrategia: Mask, poupa_contagem: bool, value: Any, depth: int) -> Any:
         """Aplica a estrategia da chave a cada folha do valor, qualquer que seja o container."""
         if depth >= _MAX_REDACT_DEPTH:
             return _REDACTED
@@ -450,23 +456,22 @@ class RedactionFilter(logging.Filter):
             value = value._asdict()
         if isinstance(value, dict):
             return {
-                _str_key(k): self._apply(estrategia, chave, v, depth + 1) for k, v in value.items()
+                _str_key(k): self._apply(estrategia, poupa_contagem, v, depth + 1)
+                for k, v in value.items()
             }
         if isinstance(value, list):
-            return [self._apply(estrategia, chave, item, depth + 1) for item in value]
+            return [self._apply(estrategia, poupa_contagem, item, depth + 1) for item in value]
         if isinstance(value, tuple):
-            return tuple(self._apply(estrategia, chave, item, depth + 1) for item in value)
+            return tuple(self._apply(estrategia, poupa_contagem, item, depth + 1) for item in value)
         if isinstance(value, set | frozenset):
-            itens = (self._apply(estrategia, chave, item, depth + 1) for item in value)
+            itens = (self._apply(estrategia, poupa_contagem, item, depth + 1) for item in value)
             return frozenset(itens) if isinstance(value, frozenset) else set(itens)
-        if isinstance(value, bool) or (
-            isinstance(value, int | float | type(None)) and chave.startswith(FLAG_KEY_PREFIXES)
-        ):
+        if isinstance(value, bool) or (poupa_contagem and _is_flag_value(value)):
             return value
         if not isinstance(value, str | bytes | bytearray):
             convertido = _as_plain_data(value)
             if convertido is not value:
-                return self._apply(estrategia, chave, convertido, depth + 1)
+                return self._apply(estrategia, poupa_contagem, convertido, depth + 1)
         return _ESTRATEGIAS[estrategia](value)
 
     def _redact_json_string(self, key: str, texto: str, depth: int) -> str:
@@ -499,6 +504,12 @@ class RedactionFilter(logging.Filter):
         return saida
 
 
+def _is_flag_value(value: Any) -> bool:
+    if value is None:
+        return True
+    return isinstance(value, int | float) and abs(value) < _MAX_COUNT_VALUE
+
+
 def _str_key(chave: Any) -> str:
     return chave if isinstance(chave, str) else str(chave)
 
@@ -510,6 +521,11 @@ def _as_plain_data(value: Any) -> Any:
         return value.model_dump(mode="json")
     if dataclasses.is_dataclass(value):
         return dataclasses.asdict(value)
+    if callable(getattr(value, "dict", None)):  # pydantic v1, sem importar pydantic
+        return value.dict()
+    atributos = getattr(type(value), "__attrs_attrs__", None)  # attrs, sem importar attrs
+    if atributos is not None:
+        return {a.name: getattr(value, a.name) for a in atributos}
     return value
 
 

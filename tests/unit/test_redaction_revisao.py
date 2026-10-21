@@ -6,12 +6,14 @@ from datetime import date
 import json
 import logging
 from uuid import UUID
+import warnings
 
 import pytest
 
 from otel_observability.logging import (
     CONTA_DIGITAL_MASK_POLICY,
     JSONFormatter,
+    Mask,
     RedactionFilter,
 )
 
@@ -283,8 +285,9 @@ class TestFlagsEContagensNaoSaoMascaradas:
             ("is_valid_email", True),
             ("total_cnpj", 3),
             ("count_cpf", 0),
-            ("num_document", 2),
-            ("qty_account_number", 1.5),
+            ("total_cpf", 9999),
+            ("total_cpf", -9999),
+            ("count_cnpj", 9999.5),
             ("hasDocument", False),
             ("isValidEmail", True),
             ("totalCnpj", 3),
@@ -323,6 +326,54 @@ class TestFlagsEContagensNaoSaoMascaradas:
         if chave == "total_cnpj" or chave == "qty_cpf" or chave == "has_document":
             assert isinstance(resultado, str)
         assert str(valor)[:5] not in str(resultado)
+
+    @pytest.mark.parametrize(
+        ("chave", "valor"),
+        [
+            ("num_cpf", 12345678901),
+            ("num_document", 12345678901),
+            ("qty_account_number", 12345678901),
+            ("num_document", 2),
+            ("qty_account_number", 7),
+            ("total_cpf", 12345678901),
+            ("total_cpf", 10000),
+            ("total_cpf", -10000),
+            ("count_cnpj", 10000.0),
+            ("has_document", 12345678901),
+        ],
+    )
+    def test_numero_de_documento_nao_e_poupado_por_prefixo(self, chave, valor):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.props = {chave: valor}
+        RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY).filter(record)
+
+        resultado = record.props[chave]
+        assert isinstance(resultado, str)
+        assert str(valor)[:3] not in resultado
+
+    @pytest.mark.parametrize("prefixo", ["has_", "is_", "total_", "count_", "num_", "qty_"])
+    @pytest.mark.parametrize("valor", [3, 12345678901, None])
+    def test_chave_exata_da_policy_nunca_e_poupada(self, prefixo, valor):
+        chave = f"{prefixo}cpf"
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        setattr(record, chave, valor)
+        RedactionFilter(mask_policy={chave: Mask.LAST4}).filter(record)
+
+        assert isinstance(getattr(record, chave), str)
+
+    def test_chave_exata_aninhada_nunca_e_poupada(self):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.props = {"itens": [{"total_cpf": 12345678901}]}
+        RedactionFilter(mask_policy={"total_cpf": Mask.LAST4}).filter(record)
+
+        assert record.props["itens"][0]["total_cpf"] == "*******8901"
+
+    def test_contagem_pequena_por_sufixo_em_lista(self):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.total_cnpj = [3, 4]
+        RedactionFilter(mask_policy=CONTA_DIGITAL_MASK_POLICY).filter(record)
+
+        assert record.total_cnpj == [3, 4]
 
     def test_credencial_booleana_continua_mascarada(self):
         record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
@@ -519,3 +570,133 @@ class TestOrdemDeHandlersDocumentada:
         assert vistos["antes"] is dto
         assert vistos["depois"] == {"document": "*******8901", "amount": 10}
         assert dto.document == DOC
+
+
+class FakeAttrib:
+    def __init__(self, name):
+        self.name = name
+
+
+class FakeAttrs:
+    """Mesma interface de uma classe attrs: `__attrs_attrs__` na classe, valores nos atributos."""
+
+    __attrs_attrs__ = (FakeAttrib("document"), FakeAttrib("amount"))
+
+    def __init__(self, document, amount):
+        self.document = document
+        self.amount = amount
+
+
+class FakeSlottedAttrs:
+    __slots__ = ("customerDocument", "n")
+    __attrs_attrs__ = (FakeAttrib("customerDocument"), FakeAttrib("n"))
+
+    def __init__(self, doc, n):
+        self.customerDocument = doc
+        self.n = n
+
+    def __repr__(self):
+        return f"FakeSlottedAttrs({self.customerDocument})"
+
+
+class FakePydanticV1:
+    """Mesma interface do pydantic v1: `.dict()` e nenhum `model_dump`."""
+
+    def __init__(self, document, amount):
+        self._d = {"document": document, "amount": amount}
+
+    def dict(self):
+        return dict(self._d)
+
+    def __str__(self):
+        return f"document={self._d['document']} amount={self._d['amount']}"
+
+
+def _pydantic_v1_real():
+    pytest.importorskip("pydantic")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        v1 = pytest.importorskip("pydantic.v1")
+
+    class ModelV1(v1.BaseModel):
+        document: str
+        amount: int
+
+    modelo = ModelV1(document=DOC, amount=1)
+    if not modelo.dict():
+        pytest.skip("pydantic.v1 nao funciona nesta versao do Python")
+    return modelo
+
+
+@pytest.mark.unit
+class TestPydanticV1EAttrs:
+    @pytest.mark.parametrize(
+        "fabrica",
+        [
+            pytest.param(_pydantic_v1_real, id="pydantic-v1-real"),
+            pytest.param(lambda: FakePydanticV1(DOC, 1), id="pydantic-v1-interface"),
+            pytest.param(lambda: FakeAttrs(DOC, 1), id="attrs-interface"),
+            pytest.param(lambda: FakeSlottedAttrs(DOC, 1), id="attrs-slots-interface"),
+        ],
+    )
+    def test_documento_mascarado_nos_dois_caminhos(self, pipe, fabrica):
+        stdout, otlp, enc = _tudo(pipe, input=fabrica())
+
+        for visto in (stdout, otlp, enc):
+            assert "1234567" not in visto
+        assert "8901" in stdout
+
+    @pytest.mark.parametrize(
+        "fabrica",
+        [
+            lambda: FakePydanticV1(DOC, 1),
+            lambda: FakeAttrs(DOC, 1),
+            lambda: FakeSlottedAttrs(DOC, 1),
+        ],
+    )
+    def test_em_qualquer_colecao_e_sob_chave_sensivel(self, pipe, fabrica):
+        stdout, otlp, enc = _tudo(
+            pipe, props={"a": [fabrica(), (fabrica(),)]}, sender_document=[fabrica()]
+        )
+
+        for visto in (stdout, otlp, enc):
+            assert "1234567" not in visto
+
+    def test_campos_viram_dict(self):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.a = FakeAttrs(DOC, 1)
+        record.b = FakePydanticV1(DOC, 2)
+        RedactionFilter().filter(record)
+
+        assert record.a == {"document": "*******8901", "amount": 1}
+        assert record.b == {"document": "*******8901", "amount": 2}
+
+    def test_dict_que_quebra_nao_derruba_e_fecha_mascarado(self):
+        class Quebrado:
+            def dict(self):
+                raise ValueError(DOC)
+
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.input = Quebrado()
+        RedactionFilter().filter(record)
+
+        assert record.input == "*****"
+
+    def test_atributo_chamado_dict_que_nao_e_metodo_nao_e_confundido(self):
+        class Config:
+            def __init__(self):
+                self.dict = {"a": 1}
+
+        cfg = Config()
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.cfg = cfg
+        RedactionFilter().filter(record)
+
+        assert record.cfg is cfg
+
+    def test_classe_nao_e_instancia(self):
+        record = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
+        record.tipo = FakeAttrs
+        RedactionFilter().filter(record)
+
+        assert record.tipo is FakeAttrs

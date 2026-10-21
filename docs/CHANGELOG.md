@@ -22,7 +22,7 @@ A comparação era exata depois de `lower()`. Vazavam `documentNumber`, `custome
 - A policy não tem `*_name`, nem `key` ou `name` sozinhos: `event_name` e `file_name` são atributos de negócio, `key` é chave de cache e de S3 e `name` é atributo reservado do `LogRecord`. Cada nome sensível é listado.
 - `mask_document` aceita `bytes`.
 - A estratégia da chave vale para cada elemento de lista, tupla, conjunto e para cada valor de dict sob chave sensível (antes a coleção inteira virava `str(lista)` e só o começo era mascarado). namedtuple, pydantic e dataclass sob chave sensível são abertos da mesma forma.
-- Valor `bool` nunca é mascarado, e `int`, `float` e `None` não são quando a chave começa com `has_`, `is_`, `total_`, `count_`, `num_` ou `qty_` (`has_document=False`, `total_cnpj=3`). Constante `FLAG_KEY_PREFIXES`. Credencial (`Mask.FULL`) continua mascarada em qualquer tipo.
+- Valor `bool` nunca é mascarado. `int`, `float` e `None` pequenos (valor absoluto abaixo de 10 000) também não são, mas só quando a estratégia veio de **sufixo** e a chave começa com `has_`, `is_`, `total_` ou `count_` (`has_document=False`, `total_cnpj=3`). Chave exata da policy nunca é poupada, e `total_cpf=12345678901` sai mascarado. Constante `FLAG_KEY_PREFIXES`. Credencial (`Mask.FULL`) continua mascarada em qualquer tipo.
 
 ## [Fix] — Objetos e strings JSON dentro de `extra` passam pelo mascaramento (CNT-3942)
 
@@ -54,7 +54,8 @@ Dois defeitos medidos com `extra={"input": dto}`: o `JSONFormatter` levantava `T
 #### Limites conhecidos
 
 - O filtro troca o valor no próprio record (necessário para o handler OTLP e o stdout receberem o mesmo mascarado, e para a idempotência da segunda passada). Um handler seu que roda **depois** dos handlers com o `RedactionFilter` recebe `dict` onde havia um objeto (`record.input.amount` dá `AttributeError`); um que roda **antes** vê o dado em claro. Não dá para copiar o record por handler sem exigir Python 3.12+ (só lá o filtro pode devolver outro record) e o pacote suporta 3.10. Handler próprio que precise do objeto original deve vir antes na lista `logger.handlers` e não pode exportar o dado.
-- Pydantic com `@model_serializer` que renomeia campos: o `model_dump` já devolve os nomes novos, e a policy casa pelos nomes novos. Objeto com `__slots__` e sem `model_dump` nem dataclass: sai como `str()`/`repr()`, sem mascarar. Use a chave exata na policy ou converta para dict antes de logar.
+- Objetos pydantic v1 (`.dict()` chamável, sem `model_dump`) e attrs (`__attrs_attrs__`) são abertos como dict, sem importar as bibliotecas, no mesmo caminho de pydantic v2 e dataclass. Qualquer outro objeto sai como `str()`/`repr()`.
+- Pydantic com `@model_serializer` que renomeia campos: o `model_dump` já devolve os nomes novos, e a policy casa pelos nomes novos. Objeto com `__slots__` que não é pydantic, dataclass nem attrs: sai como `str()`/`repr()`, sem mascarar. Use a chave exata na policy ou converta para dict antes de logar.
 - Conjunto de strings soltas não é mascarado (não há chave); só o JSON dentro delas.
 - JSON acima de 64 KB passa direto.
 - `JSONFormatter` usa `json.dumps(..., default=str)`: `UUID`, `Decimal`, `datetime` e objetos arbitrários não derrubam mais a linha.

@@ -178,7 +178,7 @@ O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Rod
 Limites conhecidos:
 
 - O filtro troca o valor no próprio record. Um handler seu que roda depois dos handlers com o `RedactionFilter` recebe `dict` no lugar do objeto; um que roda antes vê o dado em claro. Se precisar do objeto original, ponha esse handler antes na lista `logger.handlers` e não exporte o dado por ele.
-- Pydantic com `@model_serializer` que renomeia campos é mascarado pelos nomes novos. Objeto com `__slots__` sem `model_dump` nem dataclass sai como `str()`. Nesses casos use a chave exata na `mask_policy` ou converta para dict antes de logar.
+- Pydantic com `@model_serializer` que renomeia campos é mascarado pelos nomes novos. Pydantic v1 (`.dict()`) e attrs são abertos como pydantic v2 e dataclass; objeto com `__slots__` que não é nenhum desses sai como `str()`. Nesses casos use a chave exata na `mask_policy` ou converta para dict antes de logar.
 - Conjunto de strings soltas (sem chave) não é mascarado. Estrutura com mais de 32 níveis sai com `*****` no corte.
 
 Estratégias (`Mask`):
@@ -209,7 +209,7 @@ Como a chave é comparada:
 3. Sufixo: entrada da policy com `*` na frente, `{"*_document": Mask.LAST4}` casa `sender_document` e `customerDocument`. O sufixo mais longo vence. A chave `document` sozinha não casa `*_document`.
 4. Sem casamento, o valor sai intocado.
 
-`bytes` sob chave sensível são decodificados antes de mascarar. A estratégia vale para cada elemento de lista, tupla e conjunto e para cada valor de dict sob a chave. Flags e contagens não são mascaradas: `bool` nunca, e número ou `None` quando a chave começa com `has_`, `is_`, `total_`, `count_`, `num_` ou `qty_` (`has_document=False`, `total_cnpj=3`).
+`bytes` sob chave sensível são decodificados antes de mascarar. A estratégia vale para cada elemento de lista, tupla e conjunto e para cada valor de dict sob a chave. Flags e contagens não são mascaradas: `bool` nunca, e número pequeno (abaixo de 10 000) ou `None` quando a estratégia veio de sufixo e a chave começa com `has_`, `is_`, `total_` ou `count_` (`has_document=False`, `total_cnpj=3`). Chave exata da policy sempre mascara, e `total_cpf=12345678901` também.
 
 ```python
 from otel_observability import configure_logging, get_logger, mask_document, CONTA_DIGITAL_MASK_POLICY
