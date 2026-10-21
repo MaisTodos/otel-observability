@@ -1,5 +1,66 @@
 # Changelog
 
+## [Feat] — `mask_policy` casa por sufixo de chave, camelCase e kebab, e ganha `Mask.NAME` (CNT-3524)
+
+### Contexto
+
+A comparação era exata depois de `lower()`. Vazavam `documentNumber`, `customerDocument`, `pixKey`, `taxId`, `sender_document`, `recipient_document`, `account_number`, `account_branch`, `holder_name`, `user_email` e parentes. Além disso, bytes sob chave sensível saíam com sobra de dígitos: `str(b"12345678901")` é `"b'12345678901'"`, e a máscara de 4 caracteres deixava `**********901'`.
+
+### BREAKING
+
+- Quem usa `CONTA_DIGITAL_MASK_POLICY` passa a ter mascarados todos os campos que terminam em `_document`, `_cpf`, `_cnpj` e `_email`, além de `tax_id`, `account_number`, `account_branch`, `pix_key`, `addressing_key` e os nomes `account_name`, `holder_name`, `trade_name`, `user_name` (cada um também como sufixo, ex.: `sender_account_number`). Quem lia esses campos em claro no Datadog deixa de ver.
+- A chave é normalizada antes da busca (camelCase e kebab viram snake, depois lower), inclusive no `DEFAULT_MASK_POLICY`: `documentNumber` agora casa `document_number` e `Pix-Key` casa `pix_key`. A `DEFAULT_MASK_POLICY` em si não mudou.
+- `bytes` e `bytearray` sob chave sensível são decodificados (UTF-8, `errors="replace"`) antes de mascarar. Antes sobravam o prefixo `b'` e o apóstrofo final.
+
+### Mudanças
+
+#### `logging.py`
+
+- Sintaxe de sufixo: chave da policy com `*` na frente, `{"*_document": Mask.LAST4}`. Casa qualquer chave que termine em `_document`; a chave `document` sozinha não casa e continua sendo declarada à parte (já está no default). `*document` sem o sublinhado vale como `*_document`. Sufixo vazio (`"*"`, `"*_"`) levanta `ValueError` no startup.
+- Ordem de resolução: chave exata, depois o sufixo mais longo, depois nada (valor intocado).
+- `Mask.NAME`: iniciais de cada palavra (`"Joao da Silva"` vira `"J. d. S."`, `"Maria"` vira `"M."`, vazio continua vazio). Aceita o nome em qualquer caixa como as outras estratégias.
+- A policy não tem `*_name`, nem `key` ou `name` sozinhos: `event_name` e `file_name` são atributos de negócio, `key` é chave de cache e de S3 e `name` é atributo reservado do `LogRecord`. Cada nome sensível é listado.
+- `mask_document` aceita `bytes`.
+- A estratégia da chave vale para cada elemento de lista, tupla, conjunto e para cada valor de dict sob chave sensível (antes a coleção inteira virava `str(lista)` e só o começo era mascarado). namedtuple, pydantic e dataclass sob chave sensível são abertos da mesma forma.
+- Valor `bool` nunca é mascarado. `int`, `float` e `None` pequenos (valor absoluto abaixo de 10 000) também não são, mas só quando a estratégia veio de **sufixo** e a chave começa com `has_`, `is_`, `total_` ou `count_` (`has_document=False`, `total_cnpj=3`). Chave exata da policy nunca é poupada, e `total_cpf=12345678901` sai mascarado. Constante `FLAG_KEY_PREFIXES`. Credencial (`Mask.FULL`) continua mascarada em qualquer tipo.
+
+## [Fix] — Objetos e strings JSON dentro de `extra` passam pelo mascaramento (CNT-3942)
+
+### Contexto
+
+Dois defeitos medidos com `extra={"input": dto}`: o `JSONFormatter` levantava `TypeError` (`json.dumps` sem `default`) e a linha sumia do stdout, enquanto o caminho OTLP fazia `str(obj)` e mandava o dado em claro. E `extra={"props": {"event": json.dumps(event)}}`, `model_dump_json()` e `response.text` chegavam inteiros, porque o `RedactionFilter` só abria dict, lista e tupla.
+
+### BREAKING
+
+- Objetos pydantic v2 (`model_dump`) e dataclasses em `extra` saem como dict mascarado, não mais como `str(obj)`. Quem consultava no Datadog o atributo `input` como texto passa a encontrar `input.<campo>`.
+- String de até 64 KB que começa com `{` ou `[` e é JSON válido é aberta, mascarada e serializada de novo. Só é reescrita se algo foi mascarado; sem dado sensível, sai byte a byte igual. Acima de 64 KB passa direto, sem mascarar.
+- Conjuntos (`set`, `frozenset`) agora são percorridos.
+- Estruturas com mais de 32 níveis de profundidade (e ciclos) saem com `*****` no ponto do corte, mesmo sem dado sensível e na política default. O mesmo vale para JSON que o parser não abre por limite (recursão, inteiro com mais de 4300 dígitos).
+- Se o filtro falhar em um campo (objeto cujo `__str__` levanta, `model_dump` que quebra), o campo sai `*****` e o `logger.info` de quem chama não levanta.
+- Chave de dict que não é `str` (`date`, `UUID`, tupla) vira `str(chave)` na saída.
+
+### Mudanças
+
+#### `logging.py`
+
+- `RedactionFilter` converte pydantic v2 (detectado por `hasattr(v, "model_dump")`, sem importar pydantic) com `model_dump(mode="json")` e dataclass com `asdict`, e segue na recursão normal. Se a conversão falhar, o valor vira `*****`.
+- Profundidade máxima de 32 níveis (ver BREAKING).
+- Bytes e bytearray com JSON (`response.content`) seguem o mesmo caminho da string JSON; bytes que não são JSON saem como vieram. Um BOM no início do JSON é aceito.
+- namedtuple é tratada como dict (`_asdict`), então os nomes dos campos entram na decisão de mascarar.
+- O limite de 64 KB é medido em bytes UTF-8 (a contagem em bytes só roda acima de 16 mil caracteres).
+- Se o JSON mascarado contiver surrogate solto, é reserializado com `ensure_ascii=True`: o encoder OTLP descartava o atributo inteiro e o stdout o mantinha.
+- `JSONFormatter` converte chave que não é `str` e objeto cujo `__str__` falha, em vez de perder a linha.
+
+#### Limites conhecidos
+
+- O filtro troca o valor no próprio record (necessário para o handler OTLP e o stdout receberem o mesmo mascarado, e para a idempotência da segunda passada). Um handler seu que roda **depois** dos handlers com o `RedactionFilter` recebe `dict` onde havia um objeto (`record.input.amount` dá `AttributeError`); um que roda **antes** vê o dado em claro. Não dá para copiar o record por handler sem exigir Python 3.12+ (só lá o filtro pode devolver outro record) e o pacote suporta 3.10. Handler próprio que precise do objeto original deve vir antes na lista `logger.handlers` e não pode exportar o dado.
+- Objetos pydantic v1 (`.dict()` chamável, sem `model_dump`) e attrs (`__attrs_attrs__`) são abertos como dict, sem importar as bibliotecas, no mesmo caminho de pydantic v2 e dataclass. Qualquer outro objeto sai como `str()`/`repr()`.
+- Pydantic com `@model_serializer` que renomeia campos: o `model_dump` já devolve os nomes novos, e a policy casa pelos nomes novos. Objeto com `__slots__` que não é pydantic, dataclass nem attrs: sai como `str()`/`repr()`, sem mascarar. Use a chave exata na policy ou converta para dict antes de logar.
+- Conjunto de strings soltas não é mascarado (não há chave); só o JSON dentro delas.
+- JSON acima de 64 KB passa direto.
+- `JSONFormatter` usa `json.dumps(..., default=str)`: `UUID`, `Decimal`, `datetime` e objetos arbitrários não derrubam mais a linha.
+- O filtro continua rodando uma vez por record (idempotente), então o handler OTLP recebe o valor já mascarado.
+
 ## [Fix] — Texto da exceção fora do log e do span, e env numérica inválida sem repetir o valor
 
 ### Contexto

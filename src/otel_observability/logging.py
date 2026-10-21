@@ -2,9 +2,13 @@
 
 from collections.abc import Iterable
 from contextvars import ContextVar
+import dataclasses
 from enum import Enum
+from functools import lru_cache
+import json
 import logging
 import os
+import re
 import sys
 from typing import Any
 
@@ -104,6 +108,7 @@ class Mask(str, Enum):
     LAST4 = "last4"  # documento: sustentacao localiza pelos 4 digitos
     EMAIL = "email"  # j***@maistodos.com.br — dominio preservado
     PIX = "pix"  # detecta o formato do valor e delega
+    NAME = "name"
 
 
 # PII universal — vale em qualquer produto brasileiro.
@@ -125,13 +130,62 @@ DEFAULT_MASK_POLICY = {
 }
 
 # Vocabulário do domínio Conta Digital — o serviço OPTA por incluí-lo.
+# Não há "*_name": event_name e file_name são atributos de negócio, então cada nome sensível é listado.
 CONTA_DIGITAL_MASK_POLICY = {
     "account_document": Mask.LAST4,
+    "*_document": Mask.LAST4,
+    "*_cpf": Mask.LAST4,
+    "*_cnpj": Mask.LAST4,
+    "tax_id": Mask.LAST4,
+    "*_tax_id": Mask.LAST4,
+    "account_number": Mask.LAST4,
+    "*_account_number": Mask.LAST4,
+    "account_branch": Mask.LAST4,
+    "*_account_branch": Mask.LAST4,
+    "*_email": Mask.EMAIL,
+    "account_name": Mask.NAME,
+    "*_account_name": Mask.NAME,
+    "holder_name": Mask.NAME,
+    "*_holder_name": Mask.NAME,
+    "trade_name": Mask.NAME,
+    "*_trade_name": Mask.NAME,
+    "user_name": Mask.NAME,
+    "*_user_name": Mask.NAME,
     "pix_key": Mask.PIX,
+    "*_pix_key": Mask.PIX,
     "addressing_key": Mask.PIX,
+    "*_addressing_key": Mask.PIX,
 }
 
 _REDACTED = "*****"
+# Numero pequeno ou nulo sob chave sensivel POR SUFIXO com estes prefixos e flag ou contagem
+# (has_document=False, total_cnpj=3); chave exata da policy nunca e poupada, e bool nunca e mascarado.
+FLAG_KEY_PREFIXES = ("has_", "is_", "total_", "count_")
+# Contagem de verdade e pequena; um numero maior que isto sob "total_cpf" e o documento.
+_MAX_COUNT_VALUE = 10_000
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+# Acima disso (em bytes UTF-8) a string passa direto: parsear JSON grande em todo log custaria mais que o ganho.
+_MAX_JSON_PARSE_BYTES = 64 * 1024
+# Medir em bytes custa um encode; abaixo disso 1 caractere cabe em, no maximo, 4 bytes sem passar do limite.
+_BYTE_CHECK_FROM_CHARS = _MAX_JSON_PARSE_BYTES // 4
+_JSON_START = re.compile(r"[\ufeff \t\r\n]*([\[{])")
+# Corta ciclos e estruturas absurdas; o excedente vira _REDACTED em vez de estourar a pilha.
+_MAX_REDACT_DEPTH = 32
+_STRATEGY_CACHE_MAX = 4096
+
+
+def _texto(value: object) -> str:
+    # str(b"123") seria "b'123'" e deixaria o prefixo e o apóstrofo no que sobra do valor.
+    if isinstance(value, bytes | bytearray):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
+@lru_cache(maxsize=2048)
+def _normalize_key(key: str) -> str:
+    """camelCase e kebab viram snake, depois lower: documentNumber -> document_number."""
+    return _CAMEL_BOUNDARY.sub("_", key).replace("-", "_").lower()
 
 
 def mask_document(value: str | None, visible: int = 4) -> str | None:
@@ -142,7 +196,7 @@ def mask_document(value: str | None, visible: int = 4) -> str | None:
     """
     if value is None:
         return None
-    texto = str(value)
+    texto = _texto(value)
     if len(texto) <= visible:
         # Valor curto demais pra preservar sufixo sem entregar o dado inteiro.
         # Devolver em claro seria vazamento silencioso — mascara tudo.
@@ -151,14 +205,14 @@ def mask_document(value: str | None, visible: int = 4) -> str | None:
 
 
 def _mask_last4(value: object) -> str:
-    texto = str(value)
+    texto = _texto(value)
     if len(texto) <= 4:
         return "*" * len(texto)  # nunca devolver valor curto em claro
     return "*" * (len(texto) - 4) + texto[-4:]
 
 
 def _mask_email(value: object) -> str:
-    texto = str(value)
+    texto = _texto(value)
     local, sep, dominio = texto.partition("@")
     if not sep:
         return _mask_last4(texto)  # nao parece email, cai no generico
@@ -168,7 +222,7 @@ def _mask_email(value: object) -> str:
 
 def _mask_pix(value: object) -> str:
     """Chave Pix é CPF, email, telefone ou aleatória — detecta e delega."""
-    texto = str(value)
+    texto = _texto(value)
     if "@" in texto:
         return _mask_email(texto)
     somente_digitos = texto.lstrip("+").replace(".", "").replace("-", "")
@@ -177,7 +231,16 @@ def _mask_pix(value: object) -> str:
     return _REDACTED  # aleatoria: os 4 ultimos nao ajudam ninguem
 
 
-_ESTRATEGIAS = {Mask.LAST4: _mask_last4, Mask.EMAIL: _mask_email, Mask.PIX: _mask_pix}
+def _mask_name(value: object) -> str:
+    return " ".join(f"{parte[0]}." for parte in _texto(value).split())
+
+
+_ESTRATEGIAS = {
+    Mask.LAST4: _mask_last4,
+    Mask.EMAIL: _mask_email,
+    Mask.PIX: _mask_pix,
+    Mask.NAME: _mask_name,
+}
 
 
 # Atributos padrão do LogRecord que nunca devem ser inspecionados/redigidos.
@@ -281,16 +344,58 @@ class RedactionFilter(logging.Filter):
         redact_keys: Iterable[str] | None = None,
     ) -> None:
         super().__init__()
-        policy = dict(DEFAULT_MASK_POLICY)
+        self._policy: dict[str, Mask] = {}
+        self._suffixes: list[tuple[str, Mask]] = []
+        self._strategy_cache: dict[str, tuple[Mask | None, bool]] = {}
+        for chave, estrategia in DEFAULT_MASK_POLICY.items():
+            self._register(chave, estrategia)
         for chave, estrategia in (mask_policy or {}).items():
             # `Mask(...)` casa pelo valor do enum, que e minusculo: aceitar
             # "LAST4" evita um ValueError so por causa da caixa.
             if isinstance(estrategia, str):
                 estrategia = estrategia.lower()
-            policy[chave.lower()] = Mask(estrategia)  # ValueError cedo, no startup
+            self._register(chave, Mask(estrategia))  # ValueError cedo, no startup
         for chave in redact_keys or []:
-            policy.setdefault(chave.lower(), Mask.FULL)
-        self._policy = policy
+            self._register(chave, Mask.FULL, override=False)
+        self._suffixes.sort(key=lambda par: len(par[0]), reverse=True)
+
+    def _register(self, chave: str, estrategia: Mask, override: bool = True) -> None:
+        if chave.startswith("*"):
+            sufixo = _normalize_key(chave[1:].strip())
+            if not sufixo.strip("_"):
+                raise ValueError(f"sufixo vazio na mask_policy: {chave!r}")
+            sufixo = sufixo if sufixo.startswith("_") else f"_{sufixo}"
+            atuais = dict(self._suffixes)
+            if override or sufixo not in atuais:
+                atuais[sufixo] = estrategia
+            self._suffixes = list(atuais.items())
+            return
+        normalizada = _normalize_key(chave)
+        if override:
+            self._policy[normalizada] = estrategia
+        else:
+            self._policy.setdefault(normalizada, estrategia)
+
+    def _strategy_for(self, key: str) -> tuple[Mask | None, bool]:
+        """Estrategia da chave e se ela veio de sufixo e de chave com prefixo de flag."""
+        try:
+            return self._strategy_cache[key]
+        except KeyError:
+            pass
+        normalizada = _normalize_key(key)
+        estrategia = self._policy.get(normalizada)
+        poupa_contagem = False
+        if estrategia is None:
+            for sufixo, candidata in self._suffixes:
+                if normalizada.endswith(sufixo):
+                    estrategia = candidata
+                    poupa_contagem = normalizada.startswith(FLAG_KEY_PREFIXES)
+                    break
+        resultado = (estrategia, poupa_contagem)
+        if len(self._strategy_cache) >= _STRATEGY_CACHE_MAX:
+            self._strategy_cache.clear()  # chaves de dict podem ser dados (ids): nao deixa crescer
+        self._strategy_cache[key] = resultado
+        return resultado
 
     def filter(self, record: logging.LogRecord) -> bool:
         # O mesmo record passa por 2 handlers (stdout e OTLP). Remascarar o
@@ -301,24 +406,144 @@ class RedactionFilter(logging.Filter):
         for key, value in list(record.__dict__.items()):
             if key in _STANDARD_LOGRECORD_ATTRS:
                 continue
-            record.__dict__[key] = self._redact(key, value)
+            try:
+                record.__dict__[key] = self._redact(key, value)
+            except Exception:
+                # Filtro que levanta derruba o logger.info de quem chama; fecha mascarando.
+                record.__dict__[key] = _REDACTED
         record._otel_redacted = True
         return True
 
-    def _redact(self, key: str, value: Any) -> Any:
+    def _redact(self, key: str, value: Any, depth: int = 0) -> Any:
         if isinstance(key, str):
-            estrategia = self._policy.get(key.lower())
+            estrategia, poupa_contagem = self._strategy_for(key)
             if estrategia is Mask.FULL:
                 return _REDACTED
             if estrategia is not None:
-                return _ESTRATEGIAS[estrategia](value)
+                return self._apply(estrategia, poupa_contagem, value, depth)
+        if depth >= _MAX_REDACT_DEPTH:
+            return _REDACTED
+        if isinstance(value, tuple) and hasattr(value, "_asdict"):
+            value = value._asdict()
         if isinstance(value, dict):
-            return {k: self._redact(k, v) for k, v in value.items()}
+            return {
+                chave: self._redact(chave, item, depth + 1)
+                for chave, item in ((_str_key(k), v) for k, v in value.items())
+            }
         if isinstance(value, list):
-            return [self._redact(key, item) for item in value]
+            return [self._redact(key, item, depth + 1) for item in value]
         if isinstance(value, tuple):
-            return tuple(self._redact(key, item) for item in value)
+            return tuple(self._redact(key, item, depth + 1) for item in value)
+        if isinstance(value, set | frozenset):
+            itens = (self._redact(key, item, depth + 1) for item in value)
+            return frozenset(itens) if isinstance(value, frozenset) else set(itens)
+        if isinstance(value, str):
+            return self._redact_json_string(key, value, depth)
+        if isinstance(value, bytes | bytearray):
+            texto = bytes(value).decode("utf-8", errors="replace")
+            resultado = self._redact_json_string(key, texto, depth)
+            return value if resultado is texto else resultado
+        convertido = _as_plain_data(value)
+        if convertido is not value:
+            return self._redact(key, convertido, depth + 1)
         return value
+
+    def _apply(self, estrategia: Mask, poupa_contagem: bool, value: Any, depth: int) -> Any:
+        """Aplica a estrategia da chave a cada folha do valor, qualquer que seja o container."""
+        if depth >= _MAX_REDACT_DEPTH:
+            return _REDACTED
+        if isinstance(value, tuple) and hasattr(value, "_asdict"):
+            value = value._asdict()
+        if isinstance(value, dict):
+            return {
+                _str_key(k): self._apply(estrategia, poupa_contagem, v, depth + 1)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [self._apply(estrategia, poupa_contagem, item, depth + 1) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._apply(estrategia, poupa_contagem, item, depth + 1) for item in value)
+        if isinstance(value, set | frozenset):
+            itens = (self._apply(estrategia, poupa_contagem, item, depth + 1) for item in value)
+            return frozenset(itens) if isinstance(value, frozenset) else set(itens)
+        if isinstance(value, bool) or (poupa_contagem and _is_flag_value(value)):
+            return value
+        if not isinstance(value, str | bytes | bytearray):
+            convertido = _as_plain_data(value)
+            if convertido is not value:
+                return self._apply(estrategia, poupa_contagem, convertido, depth + 1)
+        return _ESTRATEGIAS[estrategia](value)
+
+    def _redact_json_string(self, key: str, texto: str, depth: int) -> str:
+        tamanho = len(texto)
+        if tamanho > _MAX_JSON_PARSE_BYTES:
+            return texto
+        if tamanho > _BYTE_CHECK_FROM_CHARS and (
+            len(texto.encode("utf-8", errors="surrogatepass")) > _MAX_JSON_PARSE_BYTES
+        ):
+            return texto
+        inicio = _JSON_START.match(texto)
+        if inicio is None:
+            return texto
+        try:
+            original = json.loads(texto[inicio.start(1) :])
+        except json.JSONDecodeError:
+            return texto
+        except (ValueError, RecursionError):
+            return _REDACTED  # parece JSON e nao abriu por limite do parser: nao emite o conteudo
+        mascarado = self._redact(key, original, depth + 1)
+        if mascarado == original:
+            return texto
+        saida = json.dumps(mascarado, ensure_ascii=False, default=str)
+        try:
+            saida.encode("utf-8")
+        except UnicodeEncodeError:
+            saida = json.dumps(
+                mascarado, default=str
+            )  # surrogate solto: o OTLP descartaria o atributo
+        return saida
+
+
+def _is_flag_value(value: Any) -> bool:
+    if value is None:
+        return True
+    return isinstance(value, int | float) and abs(value) < _MAX_COUNT_VALUE
+
+
+def _str_key(chave: Any) -> str:
+    return chave if isinstance(chave, str) else str(chave)
+
+
+def _as_plain_data(value: Any) -> Any:
+    if isinstance(value, type):
+        return value
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if dataclasses.is_dataclass(value):
+        return dataclasses.asdict(value)
+    if callable(getattr(value, "dict", None)):  # pydantic v1, sem importar pydantic
+        return value.dict()
+    atributos = getattr(type(value), "__attrs_attrs__", None)  # attrs, sem importar attrs
+    if atributos is not None:
+        return {a.name: getattr(value, a.name) for a in atributos}
+    return value
+
+
+def _json_default(valor: Any) -> str:
+    try:
+        return str(valor)
+    except Exception:
+        return f"<{type(valor).__name__}>"
+
+
+def _with_str_keys(value: Any, depth: int = 0) -> Any:
+    if depth >= _MAX_REDACT_DEPTH:
+        return _REDACTED
+    if isinstance(value, dict):
+        return {_str_key(k): _with_str_keys(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_with_str_keys(item, depth + 1) for item in value]
+    return value
 
 
 class JSONFormatter(logging.Formatter):
@@ -351,7 +576,6 @@ class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         from datetime import datetime
-        import json
 
         log_data = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -379,7 +603,11 @@ class JSONFormatter(logging.Formatter):
             if key not in _STANDARD_LOGRECORD_ATTRS:
                 log_data[key] = value
 
-        return json.dumps(log_data)
+        try:
+            return json.dumps(log_data, default=_json_default)
+        except (TypeError, ValueError):
+            # Chave que nao e str (date, UUID, tupla) ou ciclo: `default=` nao cobre chaves.
+            return json.dumps(_with_str_keys(log_data), default=_json_default)
 
 
 def configure_logging(

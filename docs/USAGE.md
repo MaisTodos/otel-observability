@@ -173,7 +173,13 @@ Complementos de span em `otel_observability`:
 
 ## 6. Redação de PII — `mask_policy`
 
-O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Roda nos dois caminhos — handler de stdout **e** handler OTLP — então tanto o stream local quanto o exportado saem mascarados. A recursão cobre dicts, listas e tuplas.
+O `RedactionFilter` mascara valores sensíveis nos campos extra de cada log. Roda nos dois caminhos — handler de stdout **e** handler OTLP — então tanto o stream local quanto o exportado saem mascarados. A recursão cobre dicts, listas, tuplas e conjuntos, e também abre objetos pydantic v2, dataclasses e strings JSON (até 64 KB) que apareçam dentro de `extra`: `extra={"input": dto}` e `extra={"props": {"event": json.dumps(evento)}}` saem mascarados nos dois caminhos. Tipos que o JSON não conhece (`UUID`, `Decimal`, `datetime`) saem como texto em vez de derrubar a linha, e chaves de dict que não são texto viram `str(chave)`. Bytes com JSON seguem o mesmo caminho. O limite de 64 KB é em bytes UTF-8.
+
+Limites conhecidos:
+
+- O filtro troca o valor no próprio record. Um handler seu que roda depois dos handlers com o `RedactionFilter` recebe `dict` no lugar do objeto; um que roda antes vê o dado em claro. Se precisar do objeto original, ponha esse handler antes na lista `logger.handlers` e não exporte o dado por ele.
+- Pydantic com `@model_serializer` que renomeia campos é mascarado pelos nomes novos. Pydantic v1 (`.dict()`) e attrs são abertos como pydantic v2 e dataclass; objeto com `__slots__` que não é nenhum desses sai como `str()`. Nesses casos use a chave exata na `mask_policy` ou converta para dict antes de logar.
+- Conjunto de strings soltas (sem chave) não é mascarado. Estrutura com mais de 32 níveis sai com `*****` no corte.
 
 Estratégias (`Mask`):
 
@@ -183,10 +189,27 @@ Estratégias (`Mask`):
 | `Mask.LAST4` | `*******8901` | Documento: sustentação localiza pelos 4 dígitos |
 | `Mask.EMAIL` | `j*********@maistodos.com.br` | Domínio preservado |
 | `Mask.PIX` | Detecta o formato (CPF, e-mail, telefone, aleatória) e delega | Chave Pix não tem formato único |
+| `Mask.NAME` | `J. d. S.` (iniciais de cada palavra) | Nome de pessoa ou empresa |
 
 `DEFAULT_MASK_POLICY` (sempre ativa): `authorization`, `access_token`, `refresh_token`, `client_secret`, `password`, `secret`, `api_key`, `dd_api_key` → FULL; `document`, `document_number`, `cpf`, `cnpj`, `phone` → LAST4; `email` → EMAIL.
 
-`CONTA_DIGITAL_MASK_POLICY` (opt-in de serviços de Conta Digital): `account_document` → LAST4, `pix_key` e `addressing_key` → PIX.
+`CONTA_DIGITAL_MASK_POLICY` (opt-in de serviços de Conta Digital):
+
+- LAST4: `account_document`, `tax_id`, `account_number`, `account_branch` e os sufixos `*_document`, `*_cpf`, `*_cnpj`.
+- EMAIL: o sufixo `*_email`.
+- PIX: `pix_key`, `addressing_key`.
+- NAME: `account_name`, `holder_name`, `trade_name`, `user_name`.
+- Os nomes de conta, Pix e nome também valem como sufixo (`sender_account_number`, `recipient_pix_key`, `legal_holder_name`).
+- `name`, `key`, `event_name` e `file_name` não estão na policy de propósito.
+
+Como a chave é comparada:
+
+1. A chave do log é normalizada: camelCase e kebab viram snake e depois lower (`documentNumber` → `document_number`, `pix-key` → `pix_key`).
+2. Chave exata na policy.
+3. Sufixo: entrada da policy com `*` na frente, `{"*_document": Mask.LAST4}` casa `sender_document` e `customerDocument`. O sufixo mais longo vence. A chave `document` sozinha não casa `*_document`.
+4. Sem casamento, o valor sai intocado.
+
+`bytes` sob chave sensível são decodificados antes de mascarar. A estratégia vale para cada elemento de lista, tupla e conjunto e para cada valor de dict sob a chave. Flags e contagens não são mascaradas: `bool` nunca, e número pequeno (abaixo de 10 000) ou `None` quando a estratégia veio de sufixo e a chave começa com `has_`, `is_`, `total_` ou `count_` (`has_document=False`, `total_cnpj=3`). Chave exata da policy sempre mascara, e `total_cpf=12345678901` também.
 
 ```python
 from otel_observability import configure_logging, get_logger, mask_document, CONTA_DIGITAL_MASK_POLICY
