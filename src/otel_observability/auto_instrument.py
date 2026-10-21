@@ -72,7 +72,7 @@ def auto_instrument(
         except ImportError:
             logger.debug(f"{lib_name} not available, skipping")
         except Exception as e:
-            logger.warning(f"Failed to instrument {lib_name}: {e}")
+            logger.warning(f"Failed to instrument {lib_name}: {type(e).__name__}")
 
 
 def _instrument_httpx():

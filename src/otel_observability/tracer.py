@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from functools import wraps
+import inspect
 import logging
 from typing import Any
 
@@ -17,10 +18,15 @@ from opentelemetry.sdk.resources import (
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from ._excecao import (
+    SPAN_SEM_REGISTRO_AUTOMATICO,
+    ExceptionSanitizingSpanProcessor,
+    mark_span_error,
+)
 from .config import TelemetryConfig
 
 logger = logging.getLogger(__name__)
@@ -48,6 +54,9 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     _config = config or TelemetryConfig.from_env()
 
+    # Import tardio: __init__.py importa deste módulo — no topo criaria ciclo.
+    from . import __version__
+
     resource = Resource.create(
         {
             SERVICE_NAME: _config.service_name,
@@ -55,17 +64,19 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
             DEPLOYMENT_ENVIRONMENT: _config.environment,
             "runtime": "lambda" if _config.is_lambda else "container",
             "telemetry.sdk.name": "otel-observability",
-            "telemetry.sdk.version": "0.1.0",
+            "telemetry.sdk.version": __version__,
         }
     )
 
-    sampler = TraceIdRatioBased(_config.sample_rate)
+    sampler = ParentBased(root=TraceIdRatioBased(_config.sample_rate))
     _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
+    _tracer_provider.add_span_processor(ExceptionSanitizingSpanProcessor())
 
     if _config.traces_enabled and _config.otlp_traces_endpoint:
         otlp_exporter = OTLPSpanExporter(
             endpoint=_config.otlp_traces_endpoint.strip(),
             headers=_config.otlp_headers or {},
+            timeout=_config.export_timeout,
         )
         _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
     else:
@@ -93,13 +104,18 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     init_otlp_log_export(_config, resource)
 
+    from .logging import _endpoint_seguro
+
     logger.info(
         f"Telemetry initialized: service={_config.service_name}, "
         f"env={_config.environment}, version={_config.service_version}, "
-        f"traces_endpoint={_config.otlp_traces_endpoint}, "
-        f"logs_endpoint={_config.otlp_logs_endpoint}, "
+        f"traces_endpoint={_endpoint_seguro(_config.otlp_traces_endpoint)}, "
+        f"logs_endpoint={_endpoint_seguro(_config.otlp_logs_endpoint)}, "
         f"sample_rate={_config.sample_rate}"
     )
+
+
+_FLUSH_MINIMO_SEGUNDOS = 0.1
 
 
 def shutdown_telemetry(timeout: int = 30) -> None:
@@ -124,21 +140,55 @@ def shutdown_telemetry(timeout: int = 30) -> None:
         logger.info("Telemetry shutdown complete")
 
 
-def get_tracer(name: str = __name__) -> trace_api.Tracer:
+def flush_telemetry(timeout: float = 5) -> None:
+    """Forca o envio do que esta em buffer, SEM desligar o provider.
+
+    Lambda reaproveita container: chamar shutdown a cada invocacao deixa o
+    BatchSpanProcessor morto da 2a em diante. Flush esvazia o buffer e mantem
+    o provider utilizavel.
+
+    `timeout` e o orcamento TOTAL da invocacao, dividido entre logs e traces —
+    tratar o valor como "por sinal" dobrava o custo do `finally` em Lambda.
+
+    Limite medido (17/09/2026): com o coletor inalcancavel por rede, o
+    `force_flush` do SDK so retorna quando o export em curso termina, entao o
+    piso de cada sinal e `OTEL_EXPORTER_OTLP_TIMEOUT` vezes as tentativas, nao
+    o valor pedido aqui. Com backend recusando conexao (caso comum de sidecar
+    fora do ar), o flush fica em segundos.
+    """
+    import time
+
+    from .logging import flush_log_export
+
+    limite = time.monotonic() + timeout
+
+    flush_log_export(timeout=max(timeout / 2, _FLUSH_MINIMO_SEGUNDOS))
+
+    if _tracer_provider:
+        restante = max(limite - time.monotonic(), _FLUSH_MINIMO_SEGUNDOS)
+        _tracer_provider.force_flush(timeout_millis=int(restante * 1000))
+
+
+def get_tracer(name: str | None = None) -> trace_api.Tracer:
     """
     Get a tracer instance.
 
     Args:
-        name: Tracer name (usually __name__ of the module).
+        name: Tracer name. Se omitido, resolve o __name__ do módulo chamador.
 
     Returns:
         Tracer instance.
 
     Example:
-        >>> tracer = get_tracer(__name__)
+        >>> tracer = get_tracer()
         >>> with tracer.start_as_current_span("my_operation"):
         ...     pass
     """
+    if name is None:
+        frame = inspect.currentframe()
+        caller = frame.f_back if frame is not None else None
+        name = caller.f_globals.get("__name__", __name__) if caller is not None else __name__
+
     return trace_api.get_tracer(name)
 
 
@@ -220,7 +270,7 @@ def trace(
         @wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             tracer = get_tracer(module_name)
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 # Set custom attributes
                 if attributes:
                     span.set_attributes(attributes)
@@ -234,14 +284,13 @@ def trace(
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     raise
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             tracer = get_tracer(module_name)
-            with tracer.start_as_current_span(span_name) as span:
+            with tracer.start_as_current_span(span_name, **SPAN_SEM_REGISTRO_AUTOMATICO) as span:
                 if attributes:
                     span.set_attributes(attributes)
 
@@ -253,8 +302,7 @@ def trace(
                     span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.record_exception(e)
+                    mark_span_error(span, e)
                     raise
 
         import asyncio
