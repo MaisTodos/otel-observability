@@ -22,7 +22,11 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
+from ._excecao import (
+    SPAN_SEM_REGISTRO_AUTOMATICO,
+    ExceptionSanitizingSpanProcessor,
+    mark_span_error,
+)
 from .config import TelemetryConfig
 
 logger = logging.getLogger(__name__)
@@ -66,6 +70,7 @@ def init_telemetry(config: TelemetryConfig | None = None) -> None:
 
     sampler = ParentBased(root=TraceIdRatioBased(_config.sample_rate))
     _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
+    _tracer_provider.add_span_processor(ExceptionSanitizingSpanProcessor())
 
     if _config.traces_enabled and _config.otlp_traces_endpoint:
         otlp_exporter = OTLPSpanExporter(

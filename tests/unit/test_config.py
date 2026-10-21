@@ -474,3 +474,17 @@ def test_aviso_de_log_format_desconhecido_nao_ecoa_o_valor(monkeypatch):
 
     assert all(MARCADOR_ENV not in str(a.message) for a in avisos)
     assert any("json" in str(a.message) for a in avisos)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("valor", [MARCADOR_ENV, "0", "65536"])
+def test_porta_do_dogstatsd_so_e_validada_quando_habilitado(monkeypatch, valor):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv("DD_DOGSTATSD_PORT", valor)
+
+    monkeypatch.setenv("DD_DOGSTATSD_ENABLED", "false")
+    assert TelemetryConfig.from_env().dogstatsd_enabled is False
+
+    monkeypatch.setenv("DD_DOGSTATSD_ENABLED", "true")
+    with pytest.raises(ValueError, match="DD_DOGSTATSD_PORT"):
+        TelemetryConfig.from_env()

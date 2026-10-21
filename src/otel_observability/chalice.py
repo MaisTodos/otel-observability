@@ -20,8 +20,8 @@ except ImportError:
 from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
-from .logging import configure_logging
-from .tracer import flush_telemetry, get_tracer, init_telemetry
+from .logging import ExceptionMessageFilter, configure_logging
+from .tracer import flush_telemetry, get_current_span, get_tracer, init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,8 @@ def instrument_chalice(
     if auto_instrument_libs:
         auto_instrument()
 
+    _proteger_log_do_app(app)
+
     # Registrar middleware HTTP
     @app.middleware("http")
     def otel_middleware(event, get_response):
@@ -157,7 +159,7 @@ def instrument_chalice(
                     elif isinstance(response, dict) and "statusCode" in response:
                         span.set_attribute("http.status_code", response["statusCode"])
 
-                    span.set_status(Status(StatusCode.OK))
+                    _fechar_status(span, response)
                     return response
                 except Exception as e:
                     mark_span_error(span, e)
@@ -172,6 +174,40 @@ def instrument_chalice(
         f"Chalice app instrumented: service={cfg.service_name}, "
         f"env={cfg.environment}, app_name={app.app_name}"
     )
+
+
+class _ErroDoAppFilter(ExceptionMessageFilter):
+    """Handler de `app.log`: o Chalice captura a exceção da view e a loga ali.
+
+    O `except` do middleware nunca roda nesse caminho, então é aqui que o span
+    ganha o erro, e o handler (sem propagar ao root) perde a mensagem.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        ja_tratado = getattr(record, "_otel_exc_sanitized", False)
+        if record.exc_info and record.exc_info[1] is not None and not ja_tratado:
+            mark_span_error(get_current_span(), record.exc_info[1])
+        return super().filter(record)
+
+
+def _proteger_log_do_app(app: Any) -> None:
+    log = getattr(app, "log", None)
+    if not isinstance(log, logging.Logger):
+        return
+    for handler in log.handlers:
+        if not any(isinstance(f, _ErroDoAppFilter) for f in handler.filters):
+            handler.addFilter(_ErroDoAppFilter())
+
+
+def _fechar_status(span: Any, response: Any) -> None:
+    codigo = getattr(response, "status_code", None)
+    if isinstance(response, dict):
+        codigo = response.get("statusCode", codigo)
+    if isinstance(codigo, int) and codigo >= 500:
+        if span.status.status_code is not StatusCode.ERROR:
+            span.set_status(Status(StatusCode.ERROR))
+        return
+    span.set_status(Status(StatusCode.OK))
 
 
 def trace_sqs_message(func: Callable) -> Callable:

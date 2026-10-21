@@ -139,13 +139,17 @@ class TelemetryConfig:
         # DogStatsD configuration
         dogstatsd_enabled = os.getenv("DD_DOGSTATSD_ENABLED", "true").lower() == "true"
         dogstatsd_host = os.getenv("DD_DOGSTATSD_HOST", "localhost")
-        dogstatsd_port = _read_env_number(
-            "DD_DOGSTATSD_PORT",
-            "8125",
-            int,
-            "dogstatsd_port must be an integer between 1 and 65535",
-            lambda v: 1 <= v <= 65535,
-        )
+        if dogstatsd_enabled:
+            dogstatsd_port = _read_env_number(
+                "DD_DOGSTATSD_PORT",
+                "8125",
+                int,
+                "dogstatsd_port must be an integer between 1 and 65535",
+                lambda v: 1 <= v <= 65535,
+            )
+        else:
+            porta = os.getenv("DD_DOGSTATSD_PORT", "")
+            dogstatsd_port = int(porta) if porta.isdecimal() else 8125
 
         return cls(
             service_name=os.getenv("OTEL_SERVICE_NAME", "unknown-service"),

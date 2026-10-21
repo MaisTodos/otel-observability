@@ -49,7 +49,7 @@ def _get_statsd_client():
         )
         return None
     except Exception as e:
-        logger.warning(f"Failed to initialize DogStatsD client: {e}")
+        logger.warning(f"Failed to initialize DogStatsD client: {type(e).__name__}")
         return None
 
 
@@ -152,7 +152,7 @@ def increment_counter(
 
         client.increment(metric_name, value=value, tags=validated_tags, sample_rate=sample_rate)
     except Exception as e:
-        logger.warning(f"Failed to send counter metric {metric_name}: {e}")
+        logger.warning(f"Failed to send counter metric {metric_name}: {type(e).__name__}")
 
 
 def set_gauge(
@@ -186,7 +186,7 @@ def set_gauge(
 
         client.gauge(metric_name, value=value, tags=validated_tags)
     except Exception as e:
-        logger.warning(f"Failed to send gauge metric {metric_name}: {e}")
+        logger.warning(f"Failed to send gauge metric {metric_name}: {type(e).__name__}")
 
 
 def record_histogram(
@@ -221,7 +221,7 @@ def record_histogram(
 
         client.histogram(metric_name, value=value, tags=validated_tags, sample_rate=sample_rate)
     except Exception as e:
-        logger.warning(f"Failed to send histogram metric {metric_name}: {e}")
+        logger.warning(f"Failed to send histogram metric {metric_name}: {type(e).__name__}")
 
 
 def record_distribution(
@@ -254,7 +254,7 @@ def record_distribution(
 
         client.distribution(metric_name, value=value, tags=validated_tags)
     except Exception as e:
-        logger.warning(f"Failed to send distribution metric {metric_name}: {e}")
+        logger.warning(f"Failed to send distribution metric {metric_name}: {type(e).__name__}")
 
 
 def track_funnel_step(
@@ -301,4 +301,4 @@ def flush() -> None:
     try:
         client.flush()
     except Exception as e:
-        logger.warning(f"Failed to flush metrics: {e}")
+        logger.warning(f"Failed to flush metrics: {type(e).__name__}")

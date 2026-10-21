@@ -217,6 +217,9 @@ _STANDARD_LOGRECORD_ATTRS = frozenset(
 )
 
 
+_FLAGS_INTERNAS = frozenset({"_otel_redacted", "_otel_exc_sanitized"})
+
+
 class ExporterLoopGuardFilter(logging.Filter):
     """Impede que o log do proprio exporter volte pro handler OTLP.
 
@@ -488,6 +491,8 @@ class FlattenAttributesLogRecordProcessor:
             return
         flattened: dict[str, Any] = {}
         for key, value in inner.attributes.items():
+            if key in _FLAGS_INTERNAS:
+                continue
             _flatten_value(key, value, flattened)
         try:
             from opentelemetry.attributes import BoundedAttributes
@@ -501,6 +506,14 @@ class FlattenAttributesLogRecordProcessor:
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return True
+
+
+def _endpoint_seguro(endpoint: str) -> str:
+    """Só scheme e host: a URL pode trazer credencial no userinfo ou na query string."""
+    from urllib.parse import urlsplit
+
+    partes = urlsplit(endpoint)
+    return f"{partes.scheme}://{partes.hostname}" if partes.hostname else "<invalido>"
 
 
 def init_otlp_log_export(config: Any, resource: Any) -> None:
@@ -547,7 +560,7 @@ def init_otlp_log_export(config: Any, resource: Any) -> None:
         otel_handler.addFilter(_active_redaction_filter or RedactionFilter())
         logging.getLogger().addHandler(otel_handler)
 
-        _module_logger.info(f"OTLP log exporter initialized: endpoint={endpoint}")
+        _module_logger.info(f"OTLP log exporter initialized: endpoint={_endpoint_seguro(endpoint)}")
 
     except ImportError:
         _module_logger.warning(
@@ -573,7 +586,7 @@ def shutdown_log_export(timeout: int = 30) -> None:
             _logger_provider.force_flush(timeout_millis=timeout * 1000)
             _logger_provider.shutdown()
         except Exception as e:
-            _module_logger.warning(f"Error during log export shutdown: {e}")
+            _module_logger.warning(f"Error during log export shutdown: {type(e).__name__}")
 
 
 def flush_log_export(timeout: float = 30) -> None:
@@ -591,7 +604,7 @@ def flush_log_export(timeout: float = 30) -> None:
         try:
             _logger_provider.force_flush(timeout_millis=int(timeout * 1000))
         except Exception as e:
-            _module_logger.warning(f"Error during log export flush: {e}")
+            _module_logger.warning(f"Error during log export flush: {type(e).__name__}")
 
 
 def get_logger(name: str) -> logging.Logger:

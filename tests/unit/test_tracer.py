@@ -143,7 +143,7 @@ class TestExportTimeout:
         init_telemetry()
 
         active_processor = otel_observability.tracer._tracer_provider._active_span_processor
-        exportador = active_processor._span_processors[0].span_exporter
+        exportador = active_processor._span_processors[1].span_exporter
         assert exportador._timeout == 2
 
     def test_export_timeout_chega_no_log_exporter(
