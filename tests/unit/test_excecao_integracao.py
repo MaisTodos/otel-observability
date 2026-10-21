@@ -324,3 +324,80 @@ class TestLogsDaPropriaLib:
         assert "coletor.exemplo.com" in caplog.text
         assert MARCADOR not in caplog.text
         assert "usuario" not in caplog.text
+
+
+@pytest.mark.unit
+def test_log_de_inicializacao_nao_traz_query_string_nem_credencial(
+    caplog, monkeypatch, reset_telemetry
+):
+    monkeypatch.setattr(trace_api, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(trace_api._TRACER_PROVIDER_SET_ONCE, "_done", False)
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "svc-teste")
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        f"https://usuario:{MARCADOR}@coletor.exemplo.com/v1/traces?token={MARCADOR}",
+    )
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", f"https://coletor.exemplo.com/v1/logs?token={MARCADOR}"
+    )
+    caplog.set_level(logging.INFO)
+    with (
+        patch("otel_observability.tracer.BatchSpanProcessor"),
+        patch("otel_observability.logging.init_otlp_log_export"),
+    ):
+        tracer_module.init_telemetry(TelemetryConfig.from_env())
+
+    assert "Telemetry initialized" in caplog.text
+    assert "coletor.exemplo.com" in caplog.text
+    assert MARCADOR not in caplog.text
+    assert "usuario" not in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not CHALICE_AVAILABLE, reason="Chalice not available")
+class TestChaliceErroTratado:
+    @staticmethod
+    def _rodar(capsys, excecao):
+        from chalice import Chalice
+        from chalice.test import Client
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        app = Chalice(app_name="app-teste")
+        with (
+            patch.object(chalice_module, "init_telemetry"),
+            patch.object(chalice_module, "auto_instrument"),
+            patch.object(chalice_module, "flush_telemetry"),
+            patch.object(chalice_module, "get_tracer", return_value=provider.get_tracer("t")),
+        ):
+            instrument_chalice(app, configure_logs=False)
+
+            @app.route("/x")
+            def _x():
+                raise excecao
+
+            with Client(app) as cliente:
+                resposta = cliente.http.get("/x")
+        capsys.readouterr()
+        return resposta, exporter.get_finished_spans()
+
+    @pytest.mark.parametrize("nome", ["BadRequestError", "NotFoundError", "ForbiddenError"])
+    def test_erro_de_view_tratado_nao_marca_erro_no_span(self, capsys, nome):
+        import chalice
+
+        resposta, (span,) = self._rodar(capsys, getattr(chalice, nome)(f"cpf {MARCADOR}"))
+
+        assert 400 <= resposta.status_code < 500
+        assert span.status.status_code is not StatusCode.ERROR
+        assert MARCADOR not in _tudo_de(span)
+
+    def test_erro_nao_tratado_marca_erro(self, capsys):
+        resposta, (span,) = self._rodar(capsys, ValueError(f"cpf {MARCADOR}"))
+
+        assert resposta.status_code == 500
+        assert span.status.status_code is StatusCode.ERROR
+
+
+def _tudo_de(span) -> str:
+    return json.dumps([span.status.description, [dict(e.attributes) for e in span.events]])

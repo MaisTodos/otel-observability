@@ -21,6 +21,7 @@ from ._excecao import SPAN_SEM_REGISTRO_AUTOMATICO, mark_span_error
 from .auto_instrument import auto_instrument
 from .config import TelemetryConfig
 from .logging import ExceptionMessageFilter, configure_logging
+from .propagation import string_attribute
 from .tracer import flush_telemetry, get_current_span, get_tracer, init_telemetry
 
 logger = logging.getLogger(__name__)
@@ -303,30 +304,17 @@ def _extract_sqs_carrier(event: dict) -> dict:
     """
     carrier = {}
 
-    if "messageAttributes" in event:
-        attrs = event["messageAttributes"]
-        if attrs:
-            if "traceparent" in attrs:
-                # Chalice pode retornar messageAttributes em diferentes formatos
-                traceparent_attr = attrs["traceparent"]
-                if isinstance(traceparent_attr, dict):
-                    carrier["traceparent"] = traceparent_attr.get(
-                        "stringValue"
-                    ) or traceparent_attr.get("Value")
-                elif isinstance(traceparent_attr, str):
-                    carrier["traceparent"] = traceparent_attr
-
-            if "tracestate" in attrs:
-                tracestate_attr = attrs["tracestate"]
-                if isinstance(tracestate_attr, dict):
-                    carrier["tracestate"] = tracestate_attr.get(
-                        "stringValue"
-                    ) or tracestate_attr.get("Value")
-                elif isinstance(tracestate_attr, str):
-                    carrier["tracestate"] = tracestate_attr
-
-            if carrier:
-                logger.debug(f"Extracted context from SQS message: {list(carrier.keys())}")
+    attrs = event.get("messageAttributes")
+    if isinstance(attrs, dict):
+        for chave in ("traceparent", "tracestate"):
+            bruto = attrs.get(chave)
+            valor = (
+                bruto if isinstance(bruto, str) else string_attribute(bruto, "stringValue", "Value")
+            )
+            if valor:
+                carrier[chave] = valor
+        if carrier:
+            logger.debug(f"Extracted context from SQS message: {list(carrier.keys())}")
 
     if not carrier:
         logger.debug("No trace context found in SQS message - starting new trace")

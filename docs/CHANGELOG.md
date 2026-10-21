@@ -56,12 +56,25 @@ O texto de uma exceção costuma carregar o dado que a levantou. Confirmado por 
 - Quem consulta `status.description` ou `exception.message` em monitor ou dashboard precisa ligar o opt-in ou migrar para `exception.type`.
 - `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_TRACES_SAMPLER_ARG` e `DD_DOGSTATSD_PORT` passam a ser validados no startup: timeout finito e maior que 0 (antes aceitava `0`, negativo, `nan` e `inf`), amostragem entre 0.0 e 1.0 (antes `nan` passava só pelo erro do `__post_init__`), porta de 1 a 65535.
 
+### Limites conhecidos
+
+- Exceção relançada ao runtime da Lambda: o runtime registra o traceback, com a mensagem, no CloudWatch por conta própria. Isso está fora do alcance da lib.
+- O sanitizador de span limpa status no formato `Tipo: mensagem` e os campos `exception.message` e `exception.stacktrace`. Status escrito à mão pelo serviço, como `str(e)` sem o prefixo do tipo, não é reconhecido e passa como está.
+
 ### Mudanças
 
 #### `_excecao.py` (novo)
 
 - Ponto único do tratamento de exceção: `mark_span_error` e `safe_exception_text`, usados pelos pontos de instrumentação.
 - `ExceptionSanitizingSpanProcessor`: remove `exception.message` e `exception.stacktrace` dos eventos e a mensagem do status (`Tipo: mensagem` vira `Tipo`) de qualquer span ao encerrar. Descrição escrita à mão que não tenha o formato `Tipo: ` fica como está. Altera `_events` e `_status` do span, campos privados do SDK; há teste contra o SDK real.
+
+#### `aws_lambda.py`, `chalice.py`, `propagation.py`
+
+- `string_attribute` lê o texto de um atributo de mensagem e devolve `None` quando o atributo é Binary, não traz o campo ou não é um dict. Antes, `traceparent` Binary em SQS ou SNS levantava `KeyError` no decorator da Lambda, o handler não rodava e o lote voltava até a DLQ. Sem carrier W3C, o contexto atual é mantido.
+
+#### `tracer.py`
+
+- O log `Telemetry initialized` mostra os endpoints OTLP só com scheme e host.
 
 #### `chalice.py`
 
