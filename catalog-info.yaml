@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: otel-observability
+  description: Biblioteca Python de OpenTelemetry para FastAPI, AWS Lambda e Chalice com integração ao Datadog via OTLP
+  tags:
+    - python
+    - opentelemetry
+    - datadog
+    - observability
+  annotations:
+    github.com/project-slug: MaisTodos/otel-observability
+spec:
+  type: library
+  lifecycle: production
+  owner: group:default/sre
+  system: platform
